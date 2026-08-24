@@ -11,12 +11,13 @@ desurf test
 
 ## Options (initial)
 
-| Option          | Meaning                                      | Notes                          |
-|-----------------|----------------------------------------------|--------------------------------|
-| `--suite <path>`| Path to a test suite directory or suite.json | Required for normal usage      |
-| `--case <id>`   | Run only the named test case                 | Optional                       |
-| `--repeat <n>`  | Execute each selected case N times           | Stage 2+                       |
-| `--offline`     | Force use of the saved-output provider       | Default behavior in Stage 1    |
+| Option            | Meaning                                      | Notes                                      |
+|-------------------|----------------------------------------------|--------------------------------------------|
+| `--suite <path>`  | Path to a test suite directory or suite.json | Required for normal usage                  |
+| `--case <id>`     | Run only the named test case                 | Optional                                   |
+| `--repeat <n>`    | Execute each selected case N times           | Default 1                                  |
+| `--provider <name>` | `offline` (default) or `openrouter`        | Offline uses saved outputs; openrouter is live |
+| `--model <id>`    | Model id for live providers                  | Default for openrouter: `openai/gpt-4o-mini` |
 
 ## Example
 
@@ -59,9 +60,16 @@ They must remain stable.
 - **REGRESSION** — every execution completed but failed assertions.
 - **ERROR** — one or more executions could not be evaluated (provider / config / tool failure).
 
+## Environment
+
+| Variable | When required |
+|----------|----------------|
+| `OPENROUTER_API_KEY` | Only when `--provider openrouter` |
+
+Never commit API keys. Prefer shell environment or a local `.env` that is gitignored.
+
 ## Notes for implementers
 
-- Stage 1 only needs a single execution path that can produce PASS (or ERROR).
-- `--repeat` and the full four-state classification arrive in Stage 2.
-- Exit codes become mandatory in Stage 3 (Regression Gate).
+- Default provider is offline (saved outputs). Live OpenRouter is opt-in via `--provider openrouter`.
 - The CLI itself must not contain assertion or reliability logic; it delegates to the runner / engine.
+- Exit codes are part of the public API and must remain stable.

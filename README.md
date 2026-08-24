@@ -41,8 +41,18 @@ npm run test:offline
 ## Commands
 
 ```bash
-desurf test --suite <path> [--case <id>] [--repeat <n>]
+desurf test --suite <path> [--case <id>] [--repeat <n>] [--provider <name>] [--model <id>]
 ```
+
+| Option | Meaning |
+|--------|---------|
+| `--suite <path>` | Path to suite directory (or suite.json) |
+| `--case <id>` | Run only the named test case |
+| `--repeat <n>` | Execute each case N times (default 1) |
+| `--provider <name>` | `offline` (default) or `openrouter` |
+| `--model <id>` | Model id for live providers (default: `openai/gpt-4o-mini`) |
+
+For `--provider openrouter`, set `OPENROUTER_API_KEY` in the environment (never commit the key).
 
 | Exit code | Meaning                                      |
 |-----------|----------------------------------------------|
