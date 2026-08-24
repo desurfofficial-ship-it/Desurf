@@ -37,7 +37,7 @@ npx tsx src/cli.ts test --suite examples/support-agent --repeat 3
 
 ### Caveat (dogfooding finding)
 
-`required` is **substring** matching on the raw output. Prefer **regex** (or tighter structured checks) when you need to assert a specific field *value*. A loose `required: "billing"` can pass when the word appears only in an explanation while `category` is wrong.
+`required` and `forbidden` are **case-sensitive literal substring** checks on the raw output. Prefer **regex** (or tighter structured checks) when you need a specific field *value*, word boundaries, or case-insensitive matching (`flags: "i"`). A loose `required: "billing"` can pass when the word appears only in an explanation while `category` is wrong.
 
 ## Why the regressed output fails
 

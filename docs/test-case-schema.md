@@ -61,18 +61,48 @@ They express the **behavioral contract**, not a golden string.
 
 Initial assertion kinds (keep the set small):
 
-1. **Required content**  
-   Something must exist in the output.  
-   Example: required section / key `"category"`.
+### `required`
 
-2. **Forbidden content**  
-   Something must not appear.
+Case-sensitive **literal substring** match on the full model output.
 
-3. **Regex**  
-   The output (or a field) must match a pattern.
+```json
+{ "type": "required", "value": "distributed" }
+```
 
-4. **JSON schema / structured output**  
-   The output must be valid JSON that conforms to an expected structure.
+- Matches: `"distributed systems"`
+- Does **not** match: `"Distributed systems"`
+
+Use `regex` with the `i` flag when case must be ignored.
+
+### `forbidden`
+
+Case-sensitive **literal substring** absence check on the full model output.
+
+```json
+{ "type": "forbidden", "value": "sorry" }
+```
+
+- Passes when `"sorry"` is absent
+- Does **not** reject: `"Sorry, your request..."` (different case)
+
+Use `regex` with the `i` flag when case must be ignored.
+
+### `regex`
+
+JavaScript regular-expression semantics via `new RegExp(pattern, flags)`.
+
+| Flags | Case behavior |
+|-------|----------------|
+| *(none)* | Case-sensitive (default) |
+| `i` | Case-insensitive |
+
+```json
+{ "type": "regex", "pattern": "\\bdistributed\\b", "flags": "i" }
+```
+
+### `json_schema`
+
+Minimal structured check: output must be valid JSON; optional `type: "object"` and `required` key list. Full JSON Schema validation is out of scope for the MVP.
 
 Later kinds may be added only when real use cases justify them.
 

@@ -63,7 +63,7 @@ node dist/cli.js test --suite fixtures/basic --case no-such-case   # exit 2
 ## Remaining limitations
 
 - Live OpenRouter provider exists (`--provider openrouter`) but requires `OPENROUTER_API_KEY`; offline remains the default CI path.
-- `required` remains substring-based (simple MVP; easy to misuse — prefer regex / json_schema for field values).
+- `required` / `forbidden` are case-sensitive literal substrings (simple MVP; easy to misuse — prefer `regex` or `json_schema` for field values or case-insensitive checks).
 - Package not published to public npm registry.
 
 ## Trust notes
