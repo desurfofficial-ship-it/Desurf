@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 /**
- * Desurf CLI — Stage 2
- * Parses args (including --repeat), runs the suite, prints reliability, sets exit code.
+ * Desurf CLI
+ * Parses args (including --repeat, --provider), runs the suite, prints reliability, sets exit code.
  * Contains no evaluation or classification logic.
  */
 
 import { resolve } from "node:path";
+import { createProvider } from "./create-provider.js";
 import { runSuite } from "./runner.js";
 import type { CaseReliability } from "./types.js";
 
@@ -13,12 +14,17 @@ function printUsage(): void {
   console.log(`Desurf — offline-first prompt regression testing
 
 Usage:
-  desurf test --suite <path> [--case <id>] [--repeat <n>]
+  desurf test --suite <path> [--case <id>] [--repeat <n>] [--provider <name>] [--model <id>]
 
 Options:
-  --suite <path>   Path to suite directory (or suite.json)
-  --case <id>      Run only the named test case
-  --repeat <n>     Execute each case N times (default 1)
+  --suite <path>       Path to suite directory (or suite.json)
+  --case <id>          Run only the named test case
+  --repeat <n>         Execute each case N times (default 1)
+  --provider <name>    offline (default) | openrouter
+  --model <id>         Model id for live providers (default for openrouter: openai/gpt-4o-mini)
+
+Environment (openrouter only):
+  OPENROUTER_API_KEY   API key for OpenRouter (never commit this)
 
 Exit codes:
   0  all tests PASS
@@ -32,6 +38,8 @@ function parseArgs(argv: string[]): {
   suite?: string;
   caseId?: string;
   repeat?: number;
+  provider?: string;
+  model?: string;
 } {
   const args = argv.slice(2);
   if (args.length === 0 || args[0] === "--help" || args[0] === "-h") {
@@ -42,6 +50,8 @@ function parseArgs(argv: string[]): {
   let suite: string | undefined;
   let caseId: string | undefined;
   let repeat: number | undefined;
+  let provider: string | undefined;
+  let model: string | undefined;
 
   for (let i = 1; i < args.length; i++) {
     const a = args[i];
@@ -55,12 +65,16 @@ function parseArgs(argv: string[]): {
         throw new Error(`--repeat must be a positive integer, got: ${args[i]}`);
       }
       repeat = n;
+    } else if (a === "--provider" && args[i + 1]) {
+      provider = args[++i];
+    } else if (a === "--model" && args[i + 1]) {
+      model = args[++i];
     } else if (a.startsWith("--")) {
       throw new Error(`Unknown option: ${a}`);
     }
   }
 
-  return { command, suite, caseId, repeat };
+  return { command, suite, caseId, repeat, provider, model };
 }
 
 function formatCase(c: CaseReliability): string {
@@ -115,11 +129,23 @@ async function main(): Promise<number> {
 
   const suitePath = resolve(parsed.suite);
 
+  let provider;
+  try {
+    provider = createProvider({
+      provider: parsed.provider,
+      model: parsed.model,
+    });
+  } catch (err) {
+    console.error(err instanceof Error ? err.message : String(err));
+    return 2;
+  }
+
   try {
     const summary = await runSuite({
       suitePath,
       caseId: parsed.caseId,
       repeat: parsed.repeat,
+      provider,
     });
 
     console.log("Desurf\n");
