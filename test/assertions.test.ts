@@ -58,6 +58,24 @@ describe("evaluateAssertion", () => {
     expect(r.passed).toBe(false);
   });
 
+  it("malformed regex does not throw; returns failed assertion", () => {
+    const r = evaluateAssertion(
+      { type: "regex", pattern: "[unterminated" },
+      goodOutput
+    );
+    expect(r.passed).toBe(false);
+    expect(r.message).toMatch(/Invalid regex/i);
+  });
+
+  it("invalid regex flags do not throw; returns failed assertion", () => {
+    const r = evaluateAssertion(
+      { type: "regex", pattern: "abc", flags: "q" },
+      goodOutput
+    );
+    expect(r.passed).toBe(false);
+    expect(r.message).toMatch(/Invalid regex/i);
+  });
+
   it("json_schema passes for valid object with required keys", () => {
     const r = evaluateAssertion(
       {

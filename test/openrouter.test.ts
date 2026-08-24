@@ -42,6 +42,8 @@ describe("OpenRouterAdapter", () => {
     const body = JSON.parse(String(init?.body));
     expect(body.model).toBe("openai/gpt-4o-mini");
     expect(body.messages[0].role).toBe("user");
+    // Timeout signal is attached (Node 18+ AbortSignal.timeout)
+    expect(init?.signal).toBeDefined();
   });
 
   it("missing API key", async () => {
@@ -60,7 +62,7 @@ describe("OpenRouterAdapter", () => {
     }
   });
 
-  it("HTTP error", async () => {
+  it("HTTP 401", async () => {
     const fetchMock = vi.fn(async () =>
       jsonResponse(401, { error: { message: "Unauthorized" } })
     );
@@ -71,6 +73,32 @@ describe("OpenRouterAdapter", () => {
     await expect(
       adapter.execute({ input: "x", prompt: "y" })
     ).rejects.toThrow(/HTTP 401/);
+  });
+
+  it("HTTP 429", async () => {
+    const fetchMock = vi.fn(async () =>
+      jsonResponse(429, { error: { message: "Rate limit exceeded" } })
+    );
+    const adapter = new OpenRouterAdapter({
+      apiKey: "test-key",
+      fetch: fetchMock as unknown as typeof fetch,
+    });
+    await expect(
+      adapter.execute({ input: "x", prompt: "y" })
+    ).rejects.toThrow(/HTTP 429/);
+  });
+
+  it("HTTP 500", async () => {
+    const fetchMock = vi.fn(async () =>
+      jsonResponse(500, { error: { message: "Internal server error" } })
+    );
+    const adapter = new OpenRouterAdapter({
+      apiKey: "test-key",
+      fetch: fetchMock as unknown as typeof fetch,
+    });
+    await expect(
+      adapter.execute({ input: "x", prompt: "y" })
+    ).rejects.toThrow(/HTTP 500/);
   });
 
   it("malformed response (not JSON)", async () => {
@@ -101,6 +129,66 @@ describe("OpenRouterAdapter", () => {
     await expect(
       adapter.execute({ input: "x", prompt: "y" })
     ).rejects.toThrow(/empty or missing message content/i);
+  });
+
+  it("error messages never include the API key", async () => {
+    const secret = "sk-super-secret-key-value-xyz";
+    const fetchMock = vi.fn(async () => {
+      throw new Error(`upstream failed involving ${secret}`);
+    });
+    const adapter = new OpenRouterAdapter({
+      apiKey: secret,
+      fetch: fetchMock as unknown as typeof fetch,
+    });
+    try {
+      await adapter.execute({ input: "x", prompt: "y" });
+      expect.fail("expected throw");
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      expect(msg).toMatch(/network error/i);
+      expect(msg).not.toContain(secret);
+      expect(msg).toContain("[redacted]");
+    }
+  });
+
+  it("timeout becomes a clean provider error", async () => {
+    const fetchMock = vi.fn(async (_url: unknown, init?: RequestInit) => {
+      const signal = init?.signal;
+      return new Promise<Response>((_resolve, reject) => {
+        if (signal?.aborted) {
+          const err = new Error("This operation was aborted");
+          err.name = "AbortError";
+          reject(err);
+          return;
+        }
+        signal?.addEventListener("abort", () => {
+          const err = new Error("This operation was aborted");
+          err.name = "AbortError";
+          reject(err);
+        });
+      });
+    });
+
+    const adapter = new OpenRouterAdapter({
+      apiKey: "test-key",
+      fetch: fetchMock as unknown as typeof fetch,
+    });
+
+    // Use a real short timeout by relying on AbortSignal.timeout in adapter;
+    // mock never resolves until aborted — but adapter uses 30s timeout.
+    // Instead simulate AbortError from fetch immediately via pre-aborted behavior:
+    const abortFetch = vi.fn(async () => {
+      const err = new Error("The operation was aborted due to timeout");
+      err.name = "TimeoutError";
+      throw err;
+    });
+    const timeoutAdapter = new OpenRouterAdapter({
+      apiKey: "test-key",
+      fetch: abortFetch as unknown as typeof fetch,
+    });
+    await expect(
+      timeoutAdapter.execute({ input: "x", prompt: "y" })
+    ).rejects.toThrow(/timed out after 30000ms/i);
   });
 
   it("custom model option is sent in body", async () => {

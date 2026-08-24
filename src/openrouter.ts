@@ -8,6 +8,8 @@ import type { ExecuteRequest, ModelAdapter, ModelOutput } from "./types.js";
 
 const DEFAULT_MODEL = "openai/gpt-4o-mini";
 const DEFAULT_BASE_URL = "https://openrouter.ai/api/v1";
+/** Request timeout for live OpenRouter calls (ms). */
+const DEFAULT_TIMEOUT_MS = 30_000;
 
 export type OpenRouterAdapterOptions = {
   /** Defaults to process.env.OPENROUTER_API_KEY */
@@ -33,6 +35,12 @@ type HttpResponse = {
   status: number;
   text(): Promise<string>;
 };
+
+/** Strip API key from any error text so it never appears in CLI/output. */
+function redactSecrets(message: string, apiKey: string): string {
+  if (!apiKey) return message;
+  return message.split(apiKey).join("[redacted]");
+}
 
 export class OpenRouterAdapter implements ModelAdapter {
   private readonly apiKey: string;
@@ -79,9 +87,21 @@ export class OpenRouterAdapter implements ModelAdapter {
           model: this.model,
           messages: [{ role: "user", content: userContent }],
         }),
+        signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS),
       })) as HttpResponse;
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const name = err instanceof Error ? err.name : "";
+      const raw = err instanceof Error ? err.message : String(err);
+      const msg = redactSecrets(raw, this.apiKey);
+      if (
+        name === "TimeoutError" ||
+        name === "AbortError" ||
+        /aborted|timeout/i.test(msg)
+      ) {
+        throw new Error(
+          `OpenRouterAdapter: request timed out after ${DEFAULT_TIMEOUT_MS}ms`
+        );
+      }
       throw new Error(`OpenRouterAdapter: network error: ${msg}`);
     }
 
@@ -95,7 +115,7 @@ export class OpenRouterAdapter implements ModelAdapter {
         // keep truncated raw body
       }
       throw new Error(
-        `OpenRouterAdapter: HTTP ${response.status}: ${detail}`
+        `OpenRouterAdapter: HTTP ${response.status}: ${redactSecrets(detail, this.apiKey)}`
       );
     }
 
