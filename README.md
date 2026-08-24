@@ -4,21 +4,24 @@
 
 Desurf is an offline-first CLI for testing AI prompt behavior and detecting regressions before they reach users.
 
-## Stage 3 status
+## Stage 4 status
 
-Regression gate in CI:
+Public example: `examples/support-agent/`
 
-- GitHub Actions runs offline only (no API keys)
-- Typecheck → unit tests → `desurf test --suite fixtures/basic --repeat 3`
-- Exit codes block bad changes: 0 = PASS, 1 = FLAKY/REGRESSION, 2 = ERROR
+- **good** → PASS (offline)
+- **regressed** → REGRESSION (offline)
+- **flaky** → demonstrated with a deterministic mock provider in tests
+
+CI regression gate remains on `fixtures/basic` (offline-only, must stay green).
 
 ## Quick start
 
 ```bash
 npm install
-npx tsx src/cli.ts test --suite fixtures/basic
 npx tsx src/cli.ts test --suite fixtures/basic --repeat 3
-npm run test:offline   # same as the CI gate
+npx tsx src/cli.ts test --suite examples/support-agent --case support-classifier-good
+npm test
+npm run test:offline
 ```
 
 ## Commands
@@ -44,9 +47,7 @@ desurf test --suite <path> [--case <id>] [--repeat <n>]
 
 ## CI
 
-Workflow: `.github/workflows/ci.yml`
-
-Runs on every push and pull request to `main`. Offline only.
+Workflow: `.github/workflows/ci.yml` — offline gate on every push/PR to `main`.
 
 ## Project docs
 
@@ -55,6 +56,7 @@ Runs on every push and pull request to `main`. Offline only.
 - [docs/architecture.md](./docs/architecture.md)
 - [docs/cli-contract.md](./docs/cli-contract.md)
 - [docs/test-case-schema.md](./docs/test-case-schema.md)
+- [examples/support-agent/README.md](./examples/support-agent/README.md)
 
 ## License
 

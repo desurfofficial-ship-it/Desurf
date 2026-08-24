@@ -12,9 +12,9 @@ This file is the starting point for any AI coding agent working on Desurf.
 
 ## Current milestone
 
-**Stage 3 — Regression Gate** is complete when GitHub Actions runs the offline gate and exit codes can block a bad change.
+**Stage 4 — Public Example** is complete when `examples/support-agent/` demonstrates good / regressed / flaky with automated integration tests.
 
-Next: **Stage 4 — Public Example** (`examples/support-agent/` with good / regressed / flaky cases).
+Next: **Stage 5 — Packaging** (package metadata, executable CLI, clean install, versioning).
 
 ## Hard rules (reminder)
 
