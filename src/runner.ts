@@ -1,35 +1,44 @@
 /**
- * Test runner (Stage 1 — single execution, offline only).
- * Orchestrates loader → provider → engine.
+ * Test runner (Stage 2 — supports --repeat N).
+ * Orchestrates loader → provider → engine → reliability classifier.
  */
 
 import { readFile } from "node:fs/promises";
 import { evaluateTestCase } from "./engine.js";
 import { loadSuite } from "./offline.js";
 import { SavedOutputAdapter } from "./provider.js";
-import type { ModelAdapter, Suite, TestCase, TestResult } from "./types.js";
+import { summarizeCase } from "./repeat.js";
+import type {
+  CaseReliability,
+  ModelAdapter,
+  Suite,
+  TestCase,
+  TestResult,
+} from "./types.js";
 
 export type RunOptions = {
   suitePath: string;
   caseId?: string;
+  /** Number of times to execute each case. Default 1. */
+  repeat?: number;
   provider?: ModelAdapter;
 };
 
 export type RunSummary = {
   suiteName: string;
-  results: TestResult[];
+  /** One entry per test case (after all repeats). */
+  cases: CaseReliability[];
   passed: number;
-  failed: number;
+  flaky: number;
+  regression: number;
   errors: number;
 };
 
-async function runOneCase(
+async function runOneExecution(
   testCase: TestCase,
   provider: ModelAdapter
 ): Promise<TestResult> {
   try {
-    // Stage 1: we still load input/prompt for completeness,
-    // but the provider only needs the saved output path.
     const [inputText, promptText] = await Promise.all([
       readFile(testCase.input, "utf8"),
       readFile(testCase.prompt, "utf8"),
@@ -55,6 +64,7 @@ async function runOneCase(
 export async function runSuite(options: RunOptions): Promise<RunSummary> {
   const suite: Suite = await loadSuite(options.suitePath);
   const provider = options.provider ?? new SavedOutputAdapter();
+  const repeat = Math.max(1, options.repeat ?? 1);
 
   let cases = suite.cases;
   if (options.caseId) {
@@ -66,20 +76,27 @@ export async function runSuite(options: RunOptions): Promise<RunSummary> {
     }
   }
 
-  const results: TestResult[] = [];
+  const caseResults: CaseReliability[] = [];
+
   for (const c of cases) {
-    results.push(await runOneCase(c, provider));
+    const executions: TestResult[] = [];
+    for (let i = 0; i < repeat; i++) {
+      executions.push(await runOneExecution(c, provider));
+    }
+    caseResults.push(summarizeCase(c.id, executions));
   }
 
-  const passed = results.filter((r) => r.passed && !r.error).length;
-  const errors = results.filter((r) => r.error).length;
-  const failed = results.length - passed - errors;
+  const passed = caseResults.filter((c) => c.state === "PASS").length;
+  const flaky = caseResults.filter((c) => c.state === "FLAKY").length;
+  const regression = caseResults.filter((c) => c.state === "REGRESSION").length;
+  const errors = caseResults.filter((c) => c.state === "ERROR").length;
 
   return {
     suiteName: suite.name,
-    results,
+    cases: caseResults,
     passed,
-    failed,
+    flaky,
+    regression,
     errors,
   };
 }
