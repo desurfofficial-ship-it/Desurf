@@ -1,21 +1,12 @@
 # Desurf — Test Case & Suite Schema
 
-This document describes the **conceptual** shape of suites, test cases, and assertions.  
-The exact JSON schema must be finalized and documented **before** implementation invents it.  
-Do not create TypeScript types until the reasons for each field are clear.
+This document describes the shape of suites, test cases, and assertions as implemented in Desurf 0.1.0.
 
 ## Suite
 
-A suite is a directory (or a single `suite.json`) that groups related test cases.
+A suite is a directory containing `suite.json` and linked files (inputs, prompts, outputs).
 
-Conceptual contents:
-
-- suite name / id
-- list of test cases (or references to them)
-- optional shared configuration
-- links to (or embedding of) inputs, prompts, and saved outputs
-
-Typical layout (from the blueprint):
+Typical layout:
 
 ```
 examples/support-agent/
@@ -26,94 +17,99 @@ examples/support-agent/
 └── README.md
 ```
 
-## Test Case
+`suite.json` includes a name and a list of cases. Paths in cases are resolved relative to the suite directory.
 
-A test case describes one concrete scenario to evaluate.
+## Test case fields
 
-Conceptual fields:
+| Field | Purpose |
+|-------|---------|
+| `id` | Stable unique identifier within the suite |
+| `input` | Path to the user / application input file |
+| `prompt` | Path to the prompt file under test |
+| `output` | Path to the saved model output (required by the loader; used by offline provider) |
+| `assertions` | List of behavioral assertions that must hold |
 
-| Field        | Purpose                                              |
-|--------------|------------------------------------------------------|
-| `id`         | Stable unique identifier within the suite            |
-| `input`      | The user / application input (or path to it)         |
-| `prompt`     | The prompt (or path / template) under test           |
-| `assertions` | List of behavioral assertions that must hold         |
-| (later)      | metadata, tags, expected category, etc.              |
-
-Illustrative TypeScript shape (not yet implemented):
-
-```ts
-type TestCase = {
-  id: string;
-  input: string;
-  prompt: string;
-  assertions: Assertion[];
-};
-```
-
-The exact implementation may differ.  
-Do not create the type until the surrounding code needs it.
+The offline provider reads `output`. Live providers ignore the saved file contents and still require the field for schema/loader compatibility.
 
 ## Assertions
 
-Assertions are the heart of Desurf.  
-They express the **behavioral contract**, not a golden string.
+Assertions express the **behavioral contract**, not a full golden string. Types match `src/types.ts` and `src/assertions.ts`.
 
-Initial assertion kinds (keep the set small):
+### `required`
 
-1. **Required content**  
-   Something must exist in the output.  
-   Example: required section / key `"category"`.
+Case-sensitive **literal substring** match on the full model output text.
 
-2. **Forbidden content**  
-   Something must not appear.
+```json
+{ "type": "required", "value": "distributed" }
+```
 
-3. **Regex**  
-   The output (or a field) must match a pattern.
+- Matches: `"distributed systems"`
+- Does **not** match: `"Distributed systems"`
 
-4. **JSON schema / structured output**  
-   The output must be valid JSON that conforms to an expected structure.
+Use `regex` with the `i` flag when case must be ignored.
 
-Later kinds may be added only when real use cases justify them.
+### `forbidden`
 
-## Evaluation model (conceptual)
+Case-sensitive **literal substring** absence check on the full model output text.
+
+```json
+{ "type": "forbidden", "value": "sorry" }
+```
+
+- Passes when `"sorry"` is absent
+- Does **not** reject: `"Sorry, your request..."` (different case)
+
+### `regex`
+
+JavaScript `RegExp` semantics: `new RegExp(pattern, flags ?? "")`.
+
+| Flags | Case behavior |
+|-------|----------------|
+| *(none)* | Case-sensitive (default) |
+| `i` | Case-insensitive |
+
+```json
+{ "type": "regex", "pattern": "\\bdistributed\\b", "flags": "i" }
+```
+
+Malformed patterns or invalid flags do not crash the process; the assertion fails with an `Invalid regex` message.
+
+### `json_schema`
+
+**Minimal** structured check (not full JSON Schema):
+
+- Output must parse as JSON
+- If `schema.type === "object"`, value must be a non-null object (not an array)
+- If `schema.required` is an array of strings, those keys must exist on the object
+
+```json
+{
+  "type": "json_schema",
+  "schema": { "type": "object", "required": ["category", "explanation"] }
+}
+```
+
+## Evaluation model
 
 ```
-TestCase
-   +
-Model Output
-   ↓
+TestCase + Model Output
+        ↓
 Evaluate each Assertion
-   ↓
+        ↓
 Assertion Results
-   ↓
-Overall Test Result (pass / fail for this execution)
+        ↓
+Test Result (pass / fail for this execution)
 ```
 
-With repeated execution the reliability engine aggregates multiple Test Results into one of:
+With repeated execution the reliability engine aggregates into PASS, FLAKY, REGRESSION, or ERROR.
 
-- PASS
-- FLAKY
-- REGRESSION
-- ERROR
+## Offline vs live
 
-## Offline / saved-output path
-
-In Stage 1 the model output comes from a **saved file** (or fixture), not from a live LLM.
-
-```
-saved output file
-      ↓
-Desurf engine
-      ↓
-assertions evaluated
-```
-
-The engine must not care whether the output was produced by a live provider or loaded from disk.
+- **Offline (default):** model text comes from the saved `output` file. Deterministic. Required CI path.
+- **Live (optional):** e.g. `--provider openrouter`. Same assertions run on live model text. **PASS is not guaranteed.** REGRESSION (exit 1) means the contract failed on usable output; ERROR (exit 2) means the provider/config path failed.
 
 ## Design rules
 
-- Prefer explicit behavioral properties over exact string matching.
-- Keep the first set of assertion types intentionally small.
-- Document the concrete JSON schema **before** writing the loader that consumes it.
-- Never let the implementation invent the schema silently.
+- Prefer explicit behavioral properties over exact full-string matching.
+- Keep the assertion set small until real use cases justify more kinds.
+- Do not weaken offline contract fixtures to accommodate live-model variability.

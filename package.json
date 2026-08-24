@@ -13,8 +13,6 @@
     "README.md"
   ],
   "scripts": {
-    "dev": "tsx src/server.ts",
-    "start": "node dist/server.js",
     "build": "tsc",
     "prepublishOnly": "npm run build",
     "test": "vitest run",
