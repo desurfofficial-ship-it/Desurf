@@ -4,15 +4,13 @@
 
 Desurf is an offline-first CLI for testing AI prompt behavior and detecting regressions before they reach users.
 
-## Stage 2 status
+## Stage 3 status
 
-Reliability classification with repeated execution:
+Regression gate in CI:
 
-- `--repeat N` runs each case N times
-- States: **PASS** / **FLAKY** / **REGRESSION** / **ERROR**
-- Deterministic exit codes for CI
-
-Still offline-first. No live model providers. No CI workflow yet (Stage 3).
+- GitHub Actions runs offline only (no API keys)
+- Typecheck → unit tests → `desurf test --suite fixtures/basic --repeat 3`
+- Exit codes block bad changes: 0 = PASS, 1 = FLAKY/REGRESSION, 2 = ERROR
 
 ## Quick start
 
@@ -20,27 +18,7 @@ Still offline-first. No live model providers. No CI workflow yet (Stage 3).
 npm install
 npx tsx src/cli.ts test --suite fixtures/basic
 npx tsx src/cli.ts test --suite fixtures/basic --repeat 3
-```
-
-Expected (single run):
-
-```
-Desurf
-
-✓ support-classifier-good
-  PASS
-
-Results: 1 passed, 0 flaky, 0 regression, 0 error
-```
-
-With `--repeat 3` (same offline fixture → all pass):
-
-```
-✓ support-classifier-good
-  PASS
-  3/3 passed
-
-Results: 1 passed, 0 flaky, 0 regression, 0 error
+npm run test:offline   # same as the CI gate
 ```
 
 ## Commands
@@ -63,6 +41,12 @@ desurf test --suite <path> [--case <id>] [--repeat <n>]
 | FLAKY        | Mix of pass and fail, no execution errors            |
 | REGRESSION   | All N executions completed but failed assertions     |
 | ERROR        | One or more executions could not be evaluated        |
+
+## CI
+
+Workflow: `.github/workflows/ci.yml`
+
+Runs on every push and pull request to `main`. Offline only.
 
 ## Project docs
 

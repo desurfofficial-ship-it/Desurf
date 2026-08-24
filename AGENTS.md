@@ -12,9 +12,9 @@ This file is the starting point for any AI coding agent working on Desurf.
 
 ## Current milestone
 
-**Stage 2 — Reliability** is complete when `--repeat N` and PASS / FLAKY / REGRESSION / ERROR work with deterministic tests.
+**Stage 3 — Regression Gate** is complete when GitHub Actions runs the offline gate and exit codes can block a bad change.
 
-Next: **Stage 3 — Regression Gate** (exit codes in CI, GitHub Actions offline workflow).
+Next: **Stage 4 — Public Example** (`examples/support-agent/` with good / regressed / flaky cases).
 
 ## Hard rules (reminder)
 

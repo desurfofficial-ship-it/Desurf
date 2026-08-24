@@ -1,0 +1,43 @@
+# Desurf — Regression Gate (Stage 3)
+# Offline-only. No API keys. No live model calls.
+# Exit codes from the CLI are the quality gate:
+#   0 = PASS
+#   1 = FLAKY or REGRESSION
+#   2 = ERROR / tool failure
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  offline-gate:
+    name: Offline regression gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Offline regression gate
+        # Runs the saved-output fixture. Failures exit 1 (quality) or 2 (error).
+        run: npm run test:offline
