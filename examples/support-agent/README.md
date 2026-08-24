@@ -30,11 +30,15 @@ npx tsx src/cli.ts test --suite examples/support-agent --repeat 3
 
 ## Assertions used
 
-- **required** — `"category"` and `billing` must appear
+- **required** — `"category"` key must appear in the output text
 - **forbidden** — must not contain `I am an AI`
-- **json_schema** — object with `category` and `explanation`
-- **regex** — `"category": "billing"`
+- **json_schema** — object with `category` and `explanation` keys
+- **regex** — `"category": "billing"` (the actual category *value*)
+
+### Caveat (dogfooding finding)
+
+`required` is **substring** matching on the raw output. Prefer **regex** (or tighter structured checks) when you need to assert a specific field *value*. A loose `required: "billing"` can pass when the word appears only in an explanation while `category` is wrong.
 
 ## Why the regressed output fails
 
-`outputs/regressed.json` uses category `other` and includes the forbidden phrase `I am an AI`, so required/forbidden/regex assertions fail → **REGRESSION**.
+`outputs/regressed.json` uses category `other` and includes the forbidden phrase `I am an AI`, so forbidden + regex assertions fail → **REGRESSION**.

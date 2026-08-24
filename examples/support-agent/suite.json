@@ -8,7 +8,6 @@
       "output": "outputs/good.json",
       "assertions": [
         { "type": "required", "value": "\"category\"" },
-        { "type": "required", "value": "billing" },
         { "type": "forbidden", "value": "I am an AI" },
         {
           "type": "json_schema",
@@ -30,7 +29,6 @@
       "output": "outputs/regressed.json",
       "assertions": [
         { "type": "required", "value": "\"category\"" },
-        { "type": "required", "value": "billing" },
         { "type": "forbidden", "value": "I am an AI" },
         {
           "type": "json_schema",
