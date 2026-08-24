@@ -1,0 +1,33 @@
+{
+  "name": "desurf",
+  "version": "0.1.0",
+  "description": "Offline-first CLI for testing AI prompt behavior and detecting regressions",
+  "type": "module",
+  "bin": {
+    "desurf": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "desurf": "tsx src/cli.ts"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "llm",
+    "prompt",
+    "testing",
+    "regression",
+    "cli"
+  ],
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}
