@@ -1,6 +1,0 @@
-{
-  "name": "Desurf",
-  "description": "Offline-first prompt regression testing tool and evaluation dashboard",
-  "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
-}
