@@ -1,0 +1,49 @@
+{
+  "name": "support-agent",
+  "cases": [
+    {
+      "id": "support-classifier-good",
+      "input": "inputs/double-charge.txt",
+      "prompt": "prompts/classify.txt",
+      "output": "outputs/good.json",
+      "assertions": [
+        { "type": "required", "value": "\"category\"" },
+        { "type": "required", "value": "billing" },
+        { "type": "forbidden", "value": "I am an AI" },
+        {
+          "type": "json_schema",
+          "schema": {
+            "type": "object",
+            "required": ["category", "explanation"]
+          }
+        },
+        {
+          "type": "regex",
+          "pattern": "\"category\"\\s*:\\s*\"billing\""
+        }
+      ]
+    },
+    {
+      "id": "support-classifier-regressed",
+      "input": "inputs/double-charge.txt",
+      "prompt": "prompts/classify.txt",
+      "output": "outputs/regressed.json",
+      "assertions": [
+        { "type": "required", "value": "\"category\"" },
+        { "type": "required", "value": "billing" },
+        { "type": "forbidden", "value": "I am an AI" },
+        {
+          "type": "json_schema",
+          "schema": {
+            "type": "object",
+            "required": ["category", "explanation"]
+          }
+        },
+        {
+          "type": "regex",
+          "pattern": "\"category\"\\s*:\\s*\"billing\""
+        }
+      ]
+    }
+  ]
+}
