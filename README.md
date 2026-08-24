@@ -4,17 +4,31 @@
 
 Desurf is an offline-first CLI for testing AI prompt behavior and detecting regressions before they reach users.
 
-## Stage 4 status
+## Install
 
-Public example: `examples/support-agent/`
+```bash
+# From source (development)
+git clone https://github.com/desurfofficial-ship-it/Desurf.git
+cd Desurf
+npm install
+npm run build
 
-- **good** → PASS (offline)
-- **regressed** → REGRESSION (offline)
-- **flaky** → demonstrated with a deterministic mock provider in tests
+# Run without global install
+node dist/cli.js test --suite fixtures/basic
 
-CI regression gate remains on `fixtures/basic` (offline-only, must stay green).
+# Or link globally for the `desurf` command
+npm link
+desurf test --suite fixtures/basic
+```
 
-## Quick start
+When published to npm:
+
+```bash
+npm install -g desurf
+desurf test --suite path/to/your-suite
+```
+
+## Quick start (development)
 
 ```bash
 npm install
@@ -36,6 +50,8 @@ desurf test --suite <path> [--case <id>] [--repeat <n>]
 | 1         | Quality gate failure (**FLAKY** or **REGRESSION**) |
 | 2         | Execution / configuration / tool error       |
 
+Exit codes are part of the public API. Do not change them without a major version bump.
+
 ## Reliability states
 
 | State        | Meaning                                              |
@@ -45,9 +61,20 @@ desurf test --suite <path> [--case <id>] [--repeat <n>]
 | REGRESSION   | All N executions completed but failed assertions     |
 | ERROR        | One or more executions could not be evaluated        |
 
+## Examples
+
+- `fixtures/basic` — minimal offline PASS case (CI gate)
+- `examples/support-agent` — good + regressed offline cases; FLAKY shown in tests
+
 ## CI
 
-Workflow: `.github/workflows/ci.yml` — offline gate on every push/PR to `main`.
+`.github/workflows/ci.yml` — typecheck, unit tests, offline gate on every push/PR to `main`.
+
+## Packaging
+
+See [docs/publishing.md](./docs/publishing.md) for versioning and publish steps.
+
+Version **0.1.0** · License **MIT**
 
 ## Project docs
 
@@ -56,8 +83,5 @@ Workflow: `.github/workflows/ci.yml` — offline gate on every push/PR to `main`
 - [docs/architecture.md](./docs/architecture.md)
 - [docs/cli-contract.md](./docs/cli-contract.md)
 - [docs/test-case-schema.md](./docs/test-case-schema.md)
+- [docs/publishing.md](./docs/publishing.md)
 - [examples/support-agent/README.md](./examples/support-agent/README.md)
-
-## License
-
-MIT

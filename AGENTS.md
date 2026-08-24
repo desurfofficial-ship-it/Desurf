@@ -9,12 +9,13 @@ This file is the starting point for any AI coding agent working on Desurf.
 3. **docs/architecture.md** — Dependency direction and component responsibilities.
 4. **docs/cli-contract.md** — Public CLI surface and exit-code contract.
 5. **docs/test-case-schema.md** — Formal description of suites, test cases, and assertions.
+6. **docs/publishing.md** — Versioning and npm publish strategy.
 
 ## Current milestone
 
-**Stage 4 — Public Example** is complete when `examples/support-agent/` demonstrates good / regressed / flaky with automated integration tests.
+**Stage 5 — Packaging** is complete when the package builds cleanly, exposes a `desurf` binary from `dist/`, and has documented publish steps.
 
-Next: **Stage 5 — Packaging** (package metadata, executable CLI, clean install, versioning).
+Next: **Stage 6 — Real Developer Validation** (talk to developers who build AI apps; do not expand features until then).
 
 ## Hard rules (reminder)
 
