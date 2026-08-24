@@ -6,6 +6,8 @@ Customer says: *"I was charged twice for my subscription."*
 
 The prompt asks the model to return JSON with `category` and `explanation`.
 
+This suite is a **behavioral-contract** example. Offline runs use saved outputs and are deterministic. That is what CI and local regression gates should use.
+
 ## Cases
 
 | Case id | Offline output | Expected reliability |
@@ -27,6 +29,24 @@ npx tsx src/cli.ts test --suite examples/support-agent --case support-classifier
 # Entire suite (will report 1 passed, 1 regression → exit 1)
 npx tsx src/cli.ts test --suite examples/support-agent --repeat 3
 ```
+
+## Optional live run
+
+You may point the **same contract** at a live model. This is **manual/optional**, not part of required CI, and **PASS is not guaranteed**.
+
+```bash
+export OPENROUTER_API_KEY=...
+desurf test \
+  --suite examples/support-agent \
+  --case support-classifier-good \
+  --provider openrouter \
+  --model openai/gpt-4o-mini \
+  --repeat 1
+```
+
+- **Exit 1 (REGRESSION)** means the model returned usable text that failed the contract (for example, not valid JSON). That does **not** by itself mean OpenRouter integration is broken.
+- **Exit 2** means the provider/config path failed (credentials, network, empty response, etc.).
+- Live output is model-dependent; do not expect determinism.
 
 ## Assertions used
 

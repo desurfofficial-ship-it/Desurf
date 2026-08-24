@@ -47,6 +47,30 @@ node dist/cli.js test --suite fixtures/basic --case no-such-case   # exit 2
 # suite pointing at missing output file → case state ERROR, exit 2
 ```
 
+## Live OpenRouter (optional dogfood)
+
+The OpenRouter path was verified end-to-end through the real CLI/adapter (not a raw HTTP probe).
+
+Findings that must stay clear in product docs:
+
+- Offline suites (`fixtures/basic`, `examples/support-agent`) are **behavioral contracts**, not provider smoke tests.
+- A live run can return **REGRESSION (exit 1)** when the model output violates the contract (e.g. non-JSON when `json_schema` is required) even though authentication and the adapter path succeeded.
+- That is expected model variability, **not** proof that OpenRouter integration is broken.
+- Integration/provider failure is **exit 2** (missing/invalid key, HTTP/network errors, empty response).
+- Required CI remains offline-only; live runs are manual/optional.
+
+Example optional invocation:
+
+```bash
+export OPENROUTER_API_KEY=...
+node dist/cli.js test \
+  --suite fixtures/basic \
+  --case support-classifier-good \
+  --provider openrouter \
+  --model openai/gpt-4o-mini \
+  --repeat 1
+```
+
 ## Problems discovered
 
 1. **Weak substring `required`**  
@@ -55,7 +79,7 @@ node dist/cli.js test --suite fixtures/basic --case no-such-case   # exit 2
    **Fix:** removed weak `required: "billing"` from `examples/support-agent`; document that field *values* should use **regex** (or structured checks).
 
 2. **Offline CLI cannot produce FLAKY**  
-   Expected for offline-first saved outputs. FLAKY needs varying outputs (live provider later, or tests with a mock provider). Documented in example README.
+   Expected for offline-first saved outputs. FLAKY needs varying outputs (live provider or tests with a mock provider). Documented in example README.
 
 3. **CLI marks**  
    PASS uses `✓`; FLAKY/REGRESSION/ERROR use `✗`. Acceptable. Counts (`n/m passed`) appear when `--repeat` > 1.
@@ -64,12 +88,12 @@ node dist/cli.js test --suite fixtures/basic --case no-such-case   # exit 2
 
 - Example suite assertions tightened (no false-positive `required: "billing"`).
 - Example README documents substring caveat.
+- Offline vs live expectations documented (contract failure ≠ integration failure).
 
 ## Remaining limitations
 
-- No live LLM provider (intentional).
-- `required` remains substring-based (simple MVP; easy to misuse).
-- Full `npm test` not re-run in the constrained dogfooding environment (see report).
+- Live OpenRouter is opt-in; required CI does not call live models.
+- `required` / `forbidden` are case-sensitive literal substrings (simple MVP; prefer `regex` / `json_schema` when needed).
 - Package not published to public npm registry.
 
 ## Trust notes
@@ -78,3 +102,4 @@ node dist/cli.js test --suite fixtures/basic --case no-such-case   # exit 2
 - **REGRESSION** lists failed assertion messages — trustworthy if assertions encode the real contract.
 - **FLAKY** classification logic is trustworthy; getting FLAKY from pure offline CLI is not expected.
 - **ERROR** is clearly distinct from assertion failure (message + exit 2).
+- Live **REGRESSION** is evidence about **model output vs contract**, not automatic evidence that the provider adapter is broken.

@@ -27,24 +27,37 @@ desurf test
 
 Never commit API keys. Prefer the shell environment or a gitignored local `.env`.
 
-## Examples
+## Offline vs live
 
-Offline (CI / default):
+| Mode | Provider | Deterministic? | Typical use |
+|------|----------|----------------|-------------|
+| **Offline** (default) | Saved outputs on disk | Yes | Contract suites, required CI |
+| **Live** | e.g. OpenRouter | No | Optional check of a real model against a contract |
+
+Suites such as `fixtures/basic` and `examples/support-agent` are **behavioral-contract tests**, not provider-health smoke tests. Offline, they use fixed saved outputs. Against a live model, the **same assertions** run on variable model text—**PASS is not guaranteed**.
+
+### Offline example (CI / default)
 
 ```bash
 desurf test --suite fixtures/basic --repeat 3
 ```
 
-Live OpenRouter (requires a real API key; not used in CI):
+### Optional live example (manual only — not required CI)
 
 ```bash
 export OPENROUTER_API_KEY=...
 desurf test \
-  --suite examples/support-agent \
+  --suite fixtures/basic \
   --case support-classifier-good \
   --provider openrouter \
-  --model openai/gpt-4o-mini
+  --model openai/gpt-4o-mini \
+  --repeat 1
 ```
+
+- Live providers are **optional** and are **never** a merge gate.
+- **Exit 1** on a live run means usable output was evaluated and the **contract failed** (REGRESSION/FLAKY). That does **not** by itself mean the OpenRouter integration is broken.
+- **Exit 2** means the run could not evaluate (missing/invalid credentials, network/HTTP errors, timeout, empty response, bad configuration).
+- Live results are model- and provider-dependent; do not treat them as deterministic.
 
 ## Expected human-readable output (illustrative)
 
@@ -64,9 +77,9 @@ Exact formatting may evolve; the reliability classification and counts must rema
 
 | Exit code | Meaning |
 |-----------|---------|
-| **0** | All selected tests are **PASS** |
-| **1** | Quality-gate failure: at least one **REGRESSION** or **FLAKY** |
-| **2** | Execution / configuration / provider / tool error (could not evaluate cleanly) |
+| **0** | **PASS** — contract evaluated and held |
+| **1** | **REGRESSION** or **FLAKY** — contract evaluated but did not hold |
+| **2** | **ERROR** — provider / configuration / tool failure (could not evaluate cleanly) |
 
 CI systems depend on these values. They must remain stable.
 
@@ -81,8 +94,8 @@ Provider failures (missing key, network error, HTTP 4xx/5xx, timeout, malformed 
 
 ## CI policy
 
-- Default CI is **offline and deterministic** (saved outputs only).
-- Live OpenRouter tests require a real API key and are **not** part of the required CI gate.
+- Required CI is **offline and deterministic** (saved outputs only).
+- Live OpenRouter requires a real API key and is **not** part of the required CI gate.
 - Unit tests mock HTTP; they do not call the network.
 
 ## Notes for implementers

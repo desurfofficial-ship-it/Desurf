@@ -56,30 +56,47 @@ desurf test --suite <path> [--case <id>] [--repeat <n>] [--provider <name>] [--m
 
 | Exit code | Meaning |
 |-----------|---------|
-| **0** | All tests **PASS** |
-| **1** | Quality gate failure (**FLAKY** or **REGRESSION**) |
-| **2** | Execution / configuration / provider / tool error |
+| **0** | **PASS** — contract evaluated and held |
+| **1** | **FLAKY** or **REGRESSION** — contract evaluated but did not hold |
+| **2** | **ERROR** — provider / configuration / tool failure (could not evaluate) |
 
 Do not change exit-code meanings without a major version bump.
 
-### Offline (default)
+## Offline vs live testing
+
+Desurf separates **deterministic contract tests** from **optional live-model runs**.
+
+### Offline contract tests (default, required CI)
+
+`fixtures/basic` and `examples/support-agent` are **behavioral-contract suites**. They use saved outputs on disk (`SavedOutputAdapter`). No API key. Results are deterministic.
 
 ```bash
 desurf test --suite fixtures/basic --repeat 3
 ```
 
-Uses saved outputs on disk. No API key. Deterministic — this is what CI runs.
+Required CI (`.github/workflows/ci.yml`) runs offline only. It does **not** call live models and does **not** need `OPENROUTER_API_KEY`.
 
-### Live OpenRouter
+### Optional live provider runs
+
+Live providers are opt-in and are **never** a merge gate.
 
 ```bash
 export OPENROUTER_API_KEY=...   # never commit this
-desurf test --suite path/to/suite --provider openrouter --model openai/gpt-4o-mini
+desurf test \
+  --suite fixtures/basic \
+  --case support-classifier-good \
+  --provider openrouter \
+  --model openai/gpt-4o-mini \
+  --repeat 1
 ```
 
-- Requires a real `OPENROUTER_API_KEY` in the environment.
-- Live calls are optional; unit tests mock HTTP and do not need a key.
-- CI remains offline and deterministic (no live provider in GitHub Actions).
+Important:
+
+- Running an offline **contract** suite against a live model does **not** guarantee **PASS**.
+- Live model output is inherently model- and provider-dependent; it is **not** assumed deterministic.
+- **Exit 1 (REGRESSION/FLAKY)** on a live run means the provider returned usable output and Desurf evaluated it, but the output **violated the contract**. That is **not** automatically an OpenRouter integration failure.
+- **Exit 2** means evaluation could not complete (missing/invalid key, network/HTTP error, timeout, empty response, bad config).
+- Live runs are useful to see how a **real model** behaves against an explicit contract; treat results as contract evidence for that model/settings, not as a substitute for offline CI.
 
 ## Reliability states
 
@@ -92,12 +109,12 @@ desurf test --suite path/to/suite --provider openrouter --model openai/gpt-4o-mi
 
 ## Examples
 
-- `fixtures/basic` — minimal offline PASS case (CI gate)
-- `examples/support-agent` — good + regressed offline cases; FLAKY shown in tests
+- `fixtures/basic` — minimal offline contract suite (CI gate)
+- `examples/support-agent` — good + regressed offline contract cases; FLAKY shown in unit tests
 
 ## CI
 
-`.github/workflows/ci.yml` — typecheck, unit tests, offline gate on every push/PR to `main`. No live API keys.
+`.github/workflows/ci.yml` — typecheck, unit tests, offline gate on every push/PR to `main`. No live API keys. Live OpenRouter is optional/manual only.
 
 ## Packaging
 
