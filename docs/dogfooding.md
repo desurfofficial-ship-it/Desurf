@@ -1,14 +1,19 @@
-# Desurf — Dogfooding notes
+# Internal dogfooding (pre-external validation)
 
-Internal verification of reliability states against real suite fixtures and the CLI.
+Goal: break Desurf ourselves before asking other developers to trust it.
 
-## Matrix (offline)
+Date: 2026-08-24  
+Repo: https://github.com/desurfofficial-ship-it/Desurf
 
-| State | How produced | Observed |
-|-------|----------------|----------|
+## What was exercised
+
+Real CLI (`dist/cli.js`) and real runner API:
+
+| Scenario | Mechanism | Expected |
+|----------|-----------|----------|
 | PASS | `fixtures/basic` offline, `--repeat 3` | PASS, exit 0 |
-| REGRESSION | `examples/support-agent` case `support-classifier-regressed` | REGRESSION, exit 1 |
-| FLAKY | Mock provider alternating pass/fail (unit/integration tests) | FLAKY classification |
+| REGRESSION | `examples/support-agent` regressed case | REGRESSION, exit 1 |
+| FLAKY | Runner + deterministic SequenceProvider | FLAKY, exit 1 (via CLI mapping) |
 | ERROR | Missing suite / missing case / missing output file | ERROR or tool error, exit 2 |
 
 ## Commands and observed results
@@ -62,8 +67,9 @@ node dist/cli.js test --suite fixtures/basic --case no-such-case   # exit 2
 
 ## Remaining limitations
 
-- Live OpenRouter provider exists (`--provider openrouter`) but requires `OPENROUTER_API_KEY`; offline remains the default CI path.
-- `required` / `forbidden` are case-sensitive literal substrings (simple MVP; easy to misuse — prefer `regex` or `json_schema` for field values or case-insensitive checks).
+- No live LLM provider (intentional).
+- `required` remains substring-based (simple MVP; easy to misuse).
+- Full `npm test` not re-run in the constrained dogfooding environment (see report).
 - Package not published to public npm registry.
 
 ## Trust notes

@@ -1,0 +1,20 @@
+{
+  "name": "one-sentence-summary",
+  "cases": [
+    {
+      "id": "summarize-distributed-systems",
+      "prompt": "prompts/one-sentence.txt",
+      "input": "inputs/distributed-systems.txt",
+      "assertions": [
+        {
+          "kind": "required",
+          "value": "distributed systems"
+        },
+        {
+          "kind": "regex",
+          "pattern": "^[^.!?\\n]+[.!?]$"
+        }
+      ]
+    }
+  ]
+}

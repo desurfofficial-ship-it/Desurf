@@ -1,0 +1,4 @@
+Summarize the following text in exactly one sentence.
+
+Text:
+{{input}}
