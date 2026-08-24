@@ -1,1 +1,0 @@
-Distributed systems are computing environments where various components located on networked computers communicate and coordinate their actions by passing messages. These systems can scale horizontally, provide fault tolerance, and handle concurrency, making them essential for modern cloud applications.
