@@ -27,9 +27,10 @@ describe("runSuite (offline)", () => {
     const summary = await runSuite({ suitePath: fixtureRoot });
     expect(summary.suiteName).toBe("basic");
     expect(summary.passed).toBe(1);
-    expect(summary.failed).toBe(0);
+    expect(summary.flaky).toBe(0);
+    expect(summary.regression).toBe(0);
     expect(summary.errors).toBe(0);
-    expect(summary.results[0].passed).toBe(true);
+    expect(summary.cases[0].state).toBe("PASS");
   });
 
   it("can select a single case by id", async () => {
@@ -37,7 +38,7 @@ describe("runSuite (offline)", () => {
       suitePath: fixtureRoot,
       caseId: "support-classifier-good",
     });
-    expect(summary.results).toHaveLength(1);
+    expect(summary.cases).toHaveLength(1);
     expect(summary.passed).toBe(1);
   });
 

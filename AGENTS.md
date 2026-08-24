@@ -12,9 +12,9 @@ This file is the starting point for any AI coding agent working on Desurf.
 
 ## Current milestone
 
-**Stage 1 — Minimal Offline Test Runner** is in progress / complete when the offline runner, assertions, CLI, and tests exist.
+**Stage 2 — Reliability** is complete when `--repeat N` and PASS / FLAKY / REGRESSION / ERROR work with deterministic tests.
 
-Next after Stage 1: **Stage 2 — Reliability** (`--repeat N`, PASS / FLAKY / REGRESSION / ERROR).
+Next: **Stage 3 — Regression Gate** (exit codes in CI, GitHub Actions offline workflow).
 
 ## Hard rules (reminder)
 
