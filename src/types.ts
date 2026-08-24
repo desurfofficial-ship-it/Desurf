@@ -1,5 +1,5 @@
 /**
- * Core types for Desurf Stage 1.
+ * Core types for Desurf.
  * Keep small and explicit. No premature abstraction.
  */
 
@@ -46,6 +46,23 @@ export type TestResult = {
   passed: boolean;
   assertionResults: AssertionResult[];
   error?: string;
+};
+
+/**
+ * Reliability classification after repeated execution.
+ * Stage 2.
+ */
+export type ReliabilityState = "PASS" | "FLAKY" | "REGRESSION" | "ERROR";
+
+/** Aggregated result for one test case after N executions. */
+export type CaseReliability = {
+  caseId: string;
+  state: ReliabilityState;
+  /** Individual execution results (length = repeat count). */
+  executions: TestResult[];
+  passCount: number;
+  failCount: number;
+  errorCount: number;
 };
 
 /** Request passed to a provider. */
