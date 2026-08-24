@@ -1,4 +1,4 @@
-# Desurf — Regression Gate (Stage 3+)
+# Desurf — Regression Gate + packaging verification
 # Offline-only. No API keys. No live model calls.
 # Exit codes from the CLI are the quality gate:
 #   0 = PASS
@@ -42,8 +42,20 @@ jobs:
         run: npm test
 
       - name: Offline regression gate
-        # Runs the saved-output fixture. Failures exit 1 (quality) or 2 (error).
+        # Runs the saved-output fixture from the repo. Failures exit 1 (quality) or 2 (error).
         run: npm run test:offline
 
-      - name: Pack check
-        run: npm run pack:check
+      - name: Pack
+        run: npm pack
+
+      - name: Clean package install + CLI verification
+        # Install the generated tarball into an empty directory and run the installed binary.
+        # Fixture is provided by the caller (repo checkout), not shipped inside the package.
+        run: |
+          set -e
+          mkdir -p /tmp/desurf-pack-test
+          cd /tmp/desurf-pack-test
+          npm install "$GITHUB_WORKSPACE"/desurf-0.1.0.tgz
+          mkdir -p fixtures/basic/{inputs,outputs,prompts}
+          cp -a "$GITHUB_WORKSPACE"/fixtures/basic/. fixtures/basic/
+          ./node_modules/.bin/desurf test --suite fixtures/basic --repeat 3
