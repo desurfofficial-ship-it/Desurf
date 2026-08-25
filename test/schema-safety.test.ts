@@ -21,6 +21,36 @@ describe("assertion schema safety", () => {
     ).toThrow(/Unknown field/i);
   });
 
+  it("rejects unknown field on required", () => {
+    expect(() =>
+      parseAssertion({
+        type: "required",
+        value: "x",
+        typoField: 1,
+      } as never)
+    ).toThrow(/Unknown field/i);
+  });
+
+  it("rejects unknown field on regex", () => {
+    expect(() =>
+      parseAssertion({
+        type: "regex",
+        pattern: "a",
+        ignoreCase: true,
+      } as never)
+    ).toThrow(/Unknown field/i);
+  });
+
+  it("rejects unknown field on json_schema", () => {
+    expect(() =>
+      parseAssertion({
+        type: "json_schema",
+        schema: { type: "object" },
+        strict: true,
+      } as never)
+    ).toThrow(/Unknown field/i);
+  });
+
   it("rejects unknown assertion type", () => {
     expect(() =>
       parseAssertion({ type: "contains", value: "x" } as never)
