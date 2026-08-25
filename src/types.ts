@@ -5,8 +5,8 @@
 
 /** A single behavioral assertion. */
 export type Assertion =
-  | { type: "required"; value: string }
-  | { type: "forbidden"; value: string }
+  | { type: "required"; value: string; caseSensitive?: boolean }
+  | { type: "forbidden"; value: string; caseSensitive?: boolean }
   | { type: "regex"; pattern: string; flags?: string }
   | { type: "json_schema"; schema: Record<string, unknown> };
 
@@ -46,6 +46,8 @@ export type TestResult = {
   passed: boolean;
   assertionResults: AssertionResult[];
   error?: string;
+  /** Truncated output text for diagnostic context (optional). */
+  outputPreview?: string;
 };
 
 /**

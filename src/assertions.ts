@@ -5,10 +5,25 @@
 
 import type { Assertion, AssertionResult, ModelOutput } from "./types.js";
 
-function evaluateRequired(output: ModelOutput, value: string): AssertionResult {
-  const passed = output.text.includes(value);
+function includesWithCase(
+  haystack: string,
+  needle: string,
+  caseSensitive: boolean
+): boolean {
+  if (caseSensitive) {
+    return haystack.includes(needle);
+  }
+  return haystack.toLowerCase().includes(needle.toLowerCase());
+}
+
+function evaluateRequired(
+  output: ModelOutput,
+  value: string,
+  caseSensitive: boolean
+): AssertionResult {
+  const passed = includesWithCase(output.text, value, caseSensitive);
   return {
-    assertion: { type: "required", value },
+    assertion: { type: "required", value, caseSensitive },
     passed,
     message: passed
       ? `Required content found: "${value}"`
@@ -16,10 +31,14 @@ function evaluateRequired(output: ModelOutput, value: string): AssertionResult {
   };
 }
 
-function evaluateForbidden(output: ModelOutput, value: string): AssertionResult {
-  const passed = !output.text.includes(value);
+function evaluateForbidden(
+  output: ModelOutput,
+  value: string,
+  caseSensitive: boolean
+): AssertionResult {
+  const passed = !includesWithCase(output.text, value, caseSensitive);
   return {
-    assertion: { type: "forbidden", value },
+    assertion: { type: "forbidden", value, caseSensitive },
     passed,
     message: passed
       ? `Forbidden content absent: "${value}"`
@@ -52,11 +71,11 @@ function evaluateRegex(
 }
 
 /**
- * Minimal JSON-schema check for Stage 1:
- * - output must be valid JSON
- * - if schema.type === "object", result must be a non-null object
- * - if schema.required is present, those keys must exist
- * Full JSON Schema validation can be added later when justified.
+ * Minimal JSON-schema subset:
+ * - valid JSON
+ * - type object
+ * - required keys
+ * - properties.<name>.const / .enum against PARSED values
  */
 function evaluateJsonSchema(
   output: ModelOutput,
@@ -97,6 +116,52 @@ function evaluateJsonSchema(
     }
   }
 
+  if (
+    schema.properties &&
+    typeof schema.properties === "object" &&
+    !Array.isArray(schema.properties) &&
+    typeof parsed === "object" &&
+    parsed !== null &&
+    !Array.isArray(parsed)
+  ) {
+    const obj = parsed as Record<string, unknown>;
+    const props = schema.properties as Record<string, unknown>;
+
+    for (const [propName, propSchema] of Object.entries(props)) {
+      if (!propSchema || typeof propSchema !== "object" || Array.isArray(propSchema)) {
+        continue;
+      }
+      const ps = propSchema as Record<string, unknown>;
+
+      if ("const" in ps) {
+        if (!(propName in obj) || obj[propName] !== ps.const) {
+          return {
+            assertion: { type: "json_schema", schema },
+            passed: false,
+            message: `Property "${propName}" expected const ${JSON.stringify(ps.const)}, got ${JSON.stringify(obj[propName])}`,
+          };
+        }
+      }
+
+      if ("enum" in ps) {
+        if (!Array.isArray(ps.enum)) {
+          return {
+            assertion: { type: "json_schema", schema },
+            passed: false,
+            message: `Property "${propName}" has invalid enum (must be an array)`,
+          };
+        }
+        if (!(propName in obj) || !ps.enum.includes(obj[propName])) {
+          return {
+            assertion: { type: "json_schema", schema },
+            passed: false,
+            message: `Property "${propName}" value ${JSON.stringify(obj[propName])} not in enum ${JSON.stringify(ps.enum)}`,
+          };
+        }
+      }
+    }
+  }
+
   return {
     assertion: { type: "json_schema", schema },
     passed: true,
@@ -104,22 +169,28 @@ function evaluateJsonSchema(
   };
 }
 
-/** Evaluate a single assertion against a model output. */
 export function evaluateAssertion(
   assertion: Assertion,
   output: ModelOutput
 ): AssertionResult {
   switch (assertion.type) {
     case "required":
-      return evaluateRequired(output, assertion.value);
+      return evaluateRequired(
+        output,
+        assertion.value,
+        assertion.caseSensitive !== false
+      );
     case "forbidden":
-      return evaluateForbidden(output, assertion.value);
+      return evaluateForbidden(
+        output,
+        assertion.value,
+        assertion.caseSensitive !== false
+      );
     case "regex":
       return evaluateRegex(output, assertion.pattern, assertion.flags);
     case "json_schema":
       return evaluateJsonSchema(output, assertion.schema);
     default: {
-      // Exhaustiveness guard
       const _exhaustive: never = assertion;
       return {
         assertion: _exhaustive,
@@ -130,7 +201,6 @@ export function evaluateAssertion(
   }
 }
 
-/** Evaluate all assertions; overall pass only if every assertion passes. */
 export function evaluateAssertions(
   assertions: Assertion[],
   output: ModelOutput

@@ -1,6 +1,7 @@
 /**
  * Offline suite loader.
  * Reads suite.json and resolves relative paths to absolute paths.
+ * Rejects unknown assertion fields so misconfigured contracts cannot silently pass.
  */
 
 import { readFile } from "node:fs/promises";
@@ -13,6 +14,8 @@ type RawAssertion = {
   pattern?: string;
   flags?: string;
   schema?: Record<string, unknown>;
+  caseSensitive?: boolean;
+  [key: string]: unknown;
 };
 
 type RawCase = {
@@ -28,25 +31,77 @@ type RawSuite = {
   cases: RawCase[];
 };
 
-function parseAssertion(raw: RawAssertion): Assertion {
+const ALLOWED_FIELDS: Record<string, Set<string>> = {
+  required: new Set(["type", "value", "caseSensitive"]),
+  forbidden: new Set(["type", "value", "caseSensitive"]),
+  regex: new Set(["type", "pattern", "flags"]),
+  json_schema: new Set(["type", "schema"]),
+};
+
+function assertNoUnknownFields(raw: RawAssertion): void {
+  const allowed = ALLOWED_FIELDS[raw.type];
+  if (!allowed) {
+    return;
+  }
+  const unknown = Object.keys(raw).filter((k) => !allowed.has(k));
+  if (unknown.length > 0) {
+    throw new Error(
+      `Unknown field(s) on "${raw.type}" assertion: ${unknown.map((k) => `"${k}"`).join(", ")}. ` +
+        `Allowed fields: ${[...allowed].join(", ")}`
+    );
+  }
+}
+
+export function parseAssertion(raw: RawAssertion): Assertion {
+  if (!raw || typeof raw !== "object" || typeof raw.type !== "string") {
+    throw new Error(`Assertion must be an object with a string "type"`);
+  }
+
+  assertNoUnknownFields(raw);
+
   switch (raw.type) {
     case "required":
       if (typeof raw.value !== "string") {
         throw new Error(`required assertion needs a string "value"`);
       }
-      return { type: "required", value: raw.value };
+      if (
+        raw.caseSensitive !== undefined &&
+        typeof raw.caseSensitive !== "boolean"
+      ) {
+        throw new Error(`required assertion "caseSensitive" must be a boolean`);
+      }
+      return {
+        type: "required",
+        value: raw.value,
+        caseSensitive: raw.caseSensitive,
+      };
     case "forbidden":
       if (typeof raw.value !== "string") {
         throw new Error(`forbidden assertion needs a string "value"`);
       }
-      return { type: "forbidden", value: raw.value };
+      if (
+        raw.caseSensitive !== undefined &&
+        typeof raw.caseSensitive !== "boolean"
+      ) {
+        throw new Error(
+          `forbidden assertion "caseSensitive" must be a boolean`
+        );
+      }
+      return {
+        type: "forbidden",
+        value: raw.value,
+        caseSensitive: raw.caseSensitive,
+      };
     case "regex":
       if (typeof raw.pattern !== "string") {
         throw new Error(`regex assertion needs a string "pattern"`);
       }
+      if (raw.flags !== undefined && typeof raw.flags !== "string") {
+        throw new Error(`regex assertion "flags" must be a string`);
+      }
       return { type: "regex", pattern: raw.pattern, flags: raw.flags };
     case "json_schema":
-      if (!raw.schema || typeof raw.schema !== "object") {
+      if (!raw.schema || typeof raw.schema !== "object" || Array.isArray(raw.schema)) {
         throw new Error(`json_schema assertion needs an object "schema"`);
       }
       return { type: "json_schema", schema: raw.schema };
@@ -59,16 +114,11 @@ function resolvePath(suiteDir: string, p: string): string {
   return isAbsolute(p) ? p : resolve(suiteDir, p);
 }
 
-/**
- * Load a suite from a directory that contains suite.json
- * or from a direct path to suite.json.
- */
 export async function loadSuite(suitePath: string): Promise<Suite> {
   const absolute = resolve(suitePath);
   let suiteFile: string;
   let rootDir: string;
 
-  // Accept either a directory or a direct path to suite.json
   if (absolute.endsWith("suite.json")) {
     suiteFile = absolute;
     rootDir = dirname(absolute);

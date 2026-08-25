@@ -1,86 +1,30 @@
-# Desurf — Architecture
+# Architecture
 
-## High-level shape
+Desurf is a small offline-first CLI for prompt regression testing.
 
-```
-Desurf
-│
-├── CLI
-│
-├── Test Runner
-│
-├── Assertion Engine
-│
-├── Repeat / Reliability Engine
-│
-├── Offline Test Loader
-│
-└── Provider Adapter
-       │
-       ├── SavedOutputAdapter (default, offline)
-       └── OpenRouterAdapter (optional live; --provider openrouter)
-```
+## Layers
 
-There is **no** supported web server or dashboard in the 0.1.0 product surface. Desurf is a CLI.
+1. **CLI** (`src/cli.ts`) — arg parsing, help, version, command dispatch (`test` / `init` / `record`), exit codes. No evaluation logic.
+2. **Loader** (`src/offline.ts`) — reads `suite.json`, validates assertion fields, resolves paths.
+3. **Init** (`src/init.ts`) — scaffolds a minimal suite.
+4. **Record** (`src/record.ts`) — live provider → write output files (no assertion evaluation).
+5. **Runner** (`src/runner.ts`) — orchestrates load → provider → engine → reliability summary.
+6. **Engine** (`src/engine.ts`) — pure: TestCase + ModelOutput → TestResult.
+7. **Assertions** (`src/assertions.ts`) — pure evaluation of required / forbidden / regex / json_schema.
+8. **Providers** (`src/provider.ts`, `src/openrouter.ts`, `src/create-provider.ts`) — `ModelAdapter` interface; offline saved-output vs OpenRouter.
+9. **Reliability** (`src/repeat.ts`) — PASS / FLAKY / REGRESSION / ERROR from N executions.
 
-## Dependency direction (strict)
+## Exit-code contract
 
-```
-CLI
- ↓
-Runner
- ↓
-Engine
- ↓
-Assertions
+- **0** PASS
+- **1** REGRESSION / FLAKY (contract failure)
+- **2** ERROR (config, schema, provider, I/O)
 
-Provider
- ↓
-Engine
-```
+## Design notes
 
-### Rules derived from the direction
+- Evaluation is pure and unit-tested in isolation.
+- Default provider is offline for deterministic CI.
+- Live providers are opt-in; never required for the offline gate.
+- Unknown assertion options are hard errors so contracts cannot silently no-op.
 
-- The **assertion engine** must not depend on the CLI.
-- The **CLI** must not contain evaluation logic.
-- The **repeat / reliability engine** coordinates repeated executions; it must **not** duplicate assertion logic.
-- The core engine does not care which provider produced the model output.
-
-## Component responsibilities
-
-| Component | Responsibility |
-|-----------|----------------|
-| CLI | Parse arguments, select provider, invoke runner, print results, set exit code. |
-| Test Runner | Orchestrate loading a suite / case and driving the engine and reliability classification. |
-| Assertion Engine | Given a model output + list of assertions → assertion results + overall pass/fail. |
-| Repeat / Reliability Engine | Run a case N times, collect outcomes, classify PASS / FLAKY / REGRESSION / ERROR. |
-| Offline Test Loader | Read suite.json + linked input / prompt / output files from disk. |
-| SavedOutputAdapter | Load saved model output from disk (deterministic; default; CI). |
-| OpenRouterAdapter | Optional live OpenRouter HTTP provider (`OPENROUTER_API_KEY`, `--model`). |
-
-## Evaluation flow (conceptual)
-
-```
-TestCase + Model Output
-        ↓
-Evaluate Assertions
-        ↓
-Assertion Results
-        ↓
-Test Result (for one execution)
-```
-
-With `--repeat N` the reliability engine aggregates multiple Test Results into one of the four reliability states.
-
-## Providers and CI
-
-- **Default provider is offline** (saved outputs). Required CI is offline-only and does not use API keys or live models.
-- **OpenRouter is opt-in** via `--provider openrouter`. Live model output is not deterministic; contract REGRESSION (exit 1) is not the same as provider ERROR (exit 2).
-- Adding another live provider should mean a new `ModelAdapter` implementation only—not engine changes.
-
-## Why this shape
-
-- Keeps evaluation pure and testable in isolation.
-- Allows offline deterministic development and CI.
-- Makes it possible to add live providers without rewriting the engine.
-- Forces a small surface area that a developer can understand and trust.
+There is **no** supported web server or dashboard in the 0.1.1 product surface. Desurf is a CLI.

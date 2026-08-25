@@ -90,7 +90,7 @@ describe("evaluateAssertion", () => {
   it("json_schema fails on invalid JSON", () => {
     const r = evaluateAssertion(
       { type: "json_schema", schema: { type: "object" } },
-      { text: "not json" }
+      { text: "not-json" }
     );
     expect(r.passed).toBe(false);
     expect(r.message).toContain("not valid JSON");
@@ -120,5 +120,114 @@ describe("evaluateAssertions", () => {
     );
     expect(results).toHaveLength(2);
     expect(results.every((r) => r.passed)).toBe(true);
+  });
+});
+
+describe("caseSensitive", () => {
+  const mixed: ModelOutput = { text: "As an AI language model, I can help." };
+
+  it("default required is case-sensitive", () => {
+    const r = evaluateAssertion({ type: "required", value: "as an ai" }, mixed);
+    expect(r.passed).toBe(false);
+  });
+
+  it("caseSensitive true required is case-sensitive", () => {
+    const r = evaluateAssertion(
+      { type: "required", value: "as an ai", caseSensitive: true },
+      mixed
+    );
+    expect(r.passed).toBe(false);
+  });
+
+  it("caseSensitive false required matches ignoring case", () => {
+    const r = evaluateAssertion(
+      { type: "required", value: "as an ai", caseSensitive: false },
+      mixed
+    );
+    expect(r.passed).toBe(true);
+  });
+
+  it("default forbidden is case-sensitive", () => {
+    const r = evaluateAssertion({ type: "forbidden", value: "as an ai" }, mixed);
+    expect(r.passed).toBe(true);
+  });
+
+  it("caseSensitive false forbidden detects different case", () => {
+    const r = evaluateAssertion(
+      { type: "forbidden", value: "as an ai", caseSensitive: false },
+      mixed
+    );
+    expect(r.passed).toBe(false);
+  });
+});
+
+describe("json_schema const and enum", () => {
+  const billing: ModelOutput = {
+    text: JSON.stringify({ category: "billing", explanation: "x" }),
+  };
+  const other: ModelOutput = {
+    text: JSON.stringify({ category: "other", explanation: "x" }),
+  };
+
+  it("const pass", () => {
+    const r = evaluateAssertion(
+      {
+        type: "json_schema",
+        schema: {
+          type: "object",
+          properties: { category: { const: "billing" } },
+        },
+      },
+      billing
+    );
+    expect(r.passed).toBe(true);
+  });
+
+  it("const failure against parsed value", () => {
+    const r = evaluateAssertion(
+      {
+        type: "json_schema",
+        schema: {
+          type: "object",
+          properties: { category: { const: "billing" } },
+        },
+      },
+      other
+    );
+    expect(r.passed).toBe(false);
+    expect(r.message).toMatch(/const/i);
+  });
+
+  it("enum pass", () => {
+    const r = evaluateAssertion(
+      {
+        type: "json_schema",
+        schema: {
+          type: "object",
+          properties: {
+            category: { enum: ["billing", "technical"] },
+          },
+        },
+      },
+      billing
+    );
+    expect(r.passed).toBe(true);
+  });
+
+  it("enum failure against parsed value", () => {
+    const r = evaluateAssertion(
+      {
+        type: "json_schema",
+        schema: {
+          type: "object",
+          properties: {
+            category: { enum: ["billing", "technical"] },
+          },
+        },
+      },
+      other
+    );
+    expect(r.passed).toBe(false);
+    expect(r.message).toMatch(/enum/i);
   });
 });
