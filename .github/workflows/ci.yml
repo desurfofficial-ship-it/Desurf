@@ -9,7 +9,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, "release/**"]
   pull_request:
     branches: [main]
 
@@ -51,11 +51,18 @@ jobs:
       - name: Clean package install + CLI verification
         # Install the generated tarball into an empty directory and run the installed binary.
         # Fixture is provided by the caller (repo checkout), not shipped inside the package.
+        # Tarball name is resolved dynamically from package name + version (no hard-coded filename).
         run: |
-          set -e
+          set -euo pipefail
+          TARBALL=$(ls -1 "$GITHUB_WORKSPACE"/desurf-*.tgz | head -n 1)
+          if [ -z "$TARBALL" ] || [ ! -f "$TARBALL" ]; then
+            echo "No desurf-*.tgz found after npm pack"
+            exit 2
+          fi
+          echo "Using tarball: $TARBALL"
           mkdir -p /tmp/desurf-pack-test
           cd /tmp/desurf-pack-test
-          npm install "$GITHUB_WORKSPACE"/desurf-0.1.0.tgz
-          mkdir -p fixtures/basic/{inputs,outputs,prompts}
-          cp -a "$GITHUB_WORKSPACE"/fixtures/basic/. fixtures/basic/
-          ./node_modules/.bin/desurf test --suite fixtures/basic --repeat 3
+          npm install "$TARBALL"
+          ./node_modules/.bin/desurf --version
+          ./node_modules/.bin/desurf init ./from-pack
+          ./node_modules/.bin/desurf test --suite ./from-pack
