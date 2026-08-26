@@ -36,15 +36,15 @@ describe("CLI", () => {
     await rm(dir, { recursive: true, force: true });
   });
 
-  it("--version prints 0.1.1 and exits 0", async () => {
+  it("--version prints 0.1.2 and exits 0", async () => {
     const r = await runCli(["--version"]);
-    expect(r.stdout.trim()).toBe("0.1.1");
+    expect(r.stdout.trim()).toBe("0.1.2");
     expect(r.code).toBe(0);
   });
 
-  it("-v prints 0.1.1 and exits 0", async () => {
+  it("-v prints 0.1.2 and exits 0", async () => {
     const r = await runCli(["-v"]);
-    expect(r.stdout.trim()).toBe("0.1.1");
+    expect(r.stdout.trim()).toBe("0.1.2");
     expect(r.code).toBe(0);
   });
 
