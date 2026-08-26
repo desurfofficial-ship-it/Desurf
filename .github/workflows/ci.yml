@@ -54,9 +54,10 @@ jobs:
         # Tarball name is resolved dynamically from package name + version (no hard-coded filename).
         run: |
           set -euo pipefail
-          TARBALL=$(ls -1 "$GITHUB_WORKSPACE"/desurf-*.tgz | head -n 1)
+          # Scoped package tarball: desurfofficial-ship-it-desurf-<version>.tgz
+          TARBALL=$(ls -1 "$GITHUB_WORKSPACE"/desurfofficial-ship-it-desurf-*.tgz 2>/dev/null | head -n 1)
           if [ -z "$TARBALL" ] || [ ! -f "$TARBALL" ]; then
-            echo "No desurf-*.tgz found after npm pack"
+            echo "No desurfofficial-ship-it-desurf-*.tgz found after npm pack"
             exit 2
           fi
           echo "Using tarball: $TARBALL"

@@ -7,7 +7,7 @@ Version **0.1.1**
 ## Install
 
 ```bash
-npm install -g desurf
+npm install -g @desurfofficial-ship-it/desurf
 ```
 
 ## Quickstart

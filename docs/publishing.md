@@ -1,6 +1,6 @@
 # Publishing strategy
 
-Desurf is versioned and published as the npm package `desurf`.
+Desurf is versioned and published as the npm package `@desurfofficial-ship-it/desurf`.
 
 ## Versioning
 
