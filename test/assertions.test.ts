@@ -147,15 +147,37 @@ describe("caseSensitive", () => {
     expect(r.passed).toBe(true);
   });
 
-  it("default forbidden is case-sensitive", () => {
+  it("default forbidden is case-insensitive", () => {
     const r = evaluateAssertion({ type: "forbidden", value: "as an ai" }, mixed);
-    expect(r.passed).toBe(true);
+    expect(r.passed).toBe(false); // "As an AI" matches case-insensitively
   });
 
   it("caseSensitive false forbidden detects different case", () => {
     const r = evaluateAssertion(
       { type: "forbidden", value: "as an ai", caseSensitive: false },
       mixed
+    );
+    expect(r.passed).toBe(false);
+  });
+
+  it("caseSensitive true forbidden is exact match only", () => {
+    const r = evaluateAssertion(
+      { type: "forbidden", value: "as an ai", caseSensitive: true },
+      mixed
+    );
+    expect(r.passed).toBe(true); // "As an AI" != "as an ai"
+  });
+
+  it("forbidden catches As an AI with default (as an AI)", () => {
+    const r = evaluateAssertion({ type: "forbidden", value: "as an AI" }, mixed);
+    expect(r.passed).toBe(false);
+  });
+
+  it("forbidden catches mixed casing My instructions are", () => {
+    const out = { text: "My instructions are to help users." };
+    const r = evaluateAssertion(
+      { type: "forbidden", value: "my instructions are" },
+      out
     );
     expect(r.passed).toBe(false);
   });
