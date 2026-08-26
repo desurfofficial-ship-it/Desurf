@@ -153,13 +153,13 @@ describe("CLI exit codes", () => {
   beforeEach(async () => { dir = await mkdtemp(join(tmpdir(), "desurf-cli-trust-")); });
   afterEach(async () => { await rm(dir, { recursive: true, force: true }); });
 
-  it("empty suite \u2192 exit 2", async () => {
+  it("empty suite -> exit 2", async () => {
     await writeSuite(dir, { name: "empty", cases: [] });
     const r = await runCli(["test", "--suite", dir]);
     expect(r.code).toBe(2);
   });
 
-  it("empty assertions \u2192 exit 2", async () => {
+  it("empty assertions -> exit 2", async () => {
     await writeSuite(dir, {
       name: "no-a",
       cases: [{ id: "c1", input: "inputs/in.txt", prompt: "prompts/p.txt", output: "outputs/out.txt", assertions: [] }],
@@ -167,7 +167,7 @@ describe("CLI exit codes", () => {
     expect((await runCli(["test", "--suite", dir])).code).toBe(2);
   });
 
-  it("duplicate IDs \u2192 exit 2", async () => {
+  it("duplicate IDs -> exit 2", async () => {
     await writeSuite(dir, {
       name: "dup",
       cases: [
@@ -178,7 +178,7 @@ describe("CLI exit codes", () => {
     expect((await runCli(["test", "--suite", dir])).code).toBe(2);
   });
 
-  it("invalid regex \u2192 exit 2", async () => {
+  it("invalid regex -> exit 2", async () => {
     await writeSuite(dir, {
       name: "bad-re",
       cases: [{ id: "c1", input: "inputs/in.txt", prompt: "prompts/p.txt", output: "outputs/out.txt", assertions: [{ type: "regex", pattern: "[unclosed" }] }],
@@ -186,7 +186,7 @@ describe("CLI exit codes", () => {
     expect((await runCli(["test", "--suite", dir])).code).toBe(2);
   });
 
-  it("unsupported json_schema keyword \u2192 exit 2", async () => {
+  it("unsupported json_schema keyword -> exit 2", async () => {
     await writeSuite(dir, {
       name: "bad-schema",
       cases: [{ id: "c1", input: "inputs/in.txt", prompt: "prompts/p.txt", output: "outputs/out.txt", assertions: [{ type: "json_schema", schema: { type: "object", minLength: 5 } }] }],
@@ -196,7 +196,7 @@ describe("CLI exit codes", () => {
     expect(r.stderr + r.stdout).toMatch(/Unsupported json_schema keyword.*"minLength"/);
   });
 
-  it("valid regex mismatch \u2192 exit 1", async () => {
+  it("valid regex mismatch -> exit 1", async () => {
     await writeSuite(dir, {
       name: "re-miss",
       cases: [{ id: "c1", input: "inputs/in.txt", prompt: "prompts/p.txt", output: "outputs/out.txt", assertions: [{ type: "regex", pattern: "definitely-not-present-xyz" }] }],
@@ -205,7 +205,7 @@ describe("CLI exit codes", () => {
     expect((await runCli(["test", "--suite", dir])).code).toBe(1);
   });
 
-  it("valid regex match \u2192 exit 0", async () => {
+  it("valid regex match -> exit 0", async () => {
     await writeSuite(dir, {
       name: "re-hit",
       cases: [{ id: "c1", input: "inputs/in.txt", prompt: "prompts/p.txt", output: "outputs/out.txt", assertions: [{ type: "regex", pattern: "hello" }] }],
@@ -213,7 +213,7 @@ describe("CLI exit codes", () => {
     expect((await runCli(["test", "--suite", dir])).code).toBe(0);
   });
 
-  it("PASS fixture \u2192 exit 0", async () => {
+  it("PASS fixture -> exit 0", async () => {
     expect((await runCli(["test", "--suite", resolve(root, "fixtures/basic")])).code).toBe(0);
   });
 });
