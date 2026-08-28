@@ -42,8 +42,9 @@ jobs:
         run: npm test
 
       - name: Offline regression gate
-        # Runs the saved-output fixture from the repo. Failures exit 1 (quality) or 2 (error).
-        run: npm run test:offline
+        # Built CLI only. Offline provider (default). No API keys. No live models.
+        # Exit 0 = pass; exit 1 = REGRESSION/FLAKY fails the job; exit 2 = ERROR fails the job.
+        run: node dist/cli.js test --suite fixtures/basic
 
       - name: Pack
         run: npm pack
