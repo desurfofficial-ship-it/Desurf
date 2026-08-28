@@ -14,38 +14,6 @@
 import { mkdir, writeFile, access, constants } from "node:fs/promises";
 import { resolve, basename, join } from "node:path";
 
-const SUITE_JSON = `{
-  "name": "PLACEHOLDER_NAME",
-  "cases": [
-    {
-      "id": "example-case",
-      "input": "inputs/support-request.txt",
-      "prompt": "prompts/classify.txt",
-      "output": "outputs/classify.json",
-      "assertions": [
-        { "type": "forbidden", "value": "I am an AI", "caseSensitive": false },
-        {
-          "type": "json_schema",
-          "schema": {
-            "type": "object",
-            "required": ["category", "reason"],
-            "properties": {
-              "category": {
-                "enum": ["billing", "technical", "account", "other"]
-              }
-            }
-          }
-        },
-        {
-          "type": "regex",
-          "pattern": "\\"category\\"\\\\s*:\\\\s*\\"technical\\""
-        }
-      ]
-    }
-  ]
-}
-`;
-
 const INPUT_TXT = `My app keeps crashing when I try to export a report. Error code: OPS-503.
 `;
 
@@ -63,6 +31,40 @@ const OUTPUT_JSON = `{
   "reason": "The issue involves an operational failure or system error (OPS-503 crash on export)."
 }
 `;
+
+function buildSuiteJson(name: string): string {
+  const suite = {
+    name,
+    cases: [
+      {
+        id: "example-case",
+        input: "inputs/support-request.txt",
+        prompt: "prompts/classify.txt",
+        output: "outputs/classify.json",
+        assertions: [
+          { type: "forbidden", value: "I am an AI", caseSensitive: false },
+          {
+            type: "json_schema",
+            schema: {
+              type: "object",
+              required: ["category", "reason"],
+              properties: {
+                category: {
+                  enum: ["billing", "technical", "account", "other"],
+                },
+              },
+            },
+          },
+          {
+            type: "regex",
+            pattern: '"category"\\s*:\\s*"technical"',
+          },
+        ],
+      },
+    ],
+  };
+  return JSON.stringify(suite, null, 2) + "\n";
+}
 
 async function pathExists(p: string): Promise<boolean> {
   try {
@@ -106,9 +108,8 @@ export async function initSuite(targetDir: string): Promise<string> {
   await mkdir(outputsDir, { recursive: true });
 
   const name = basename(abs) || "my-suite";
-  const suiteContent = SUITE_JSON.replace("PLACEHOLDER_NAME", name);
 
-  await writeFile(suiteJson, suiteContent, "utf8");
+  await writeFile(suiteJson, buildSuiteJson(name), "utf8");
   await writeFile(join(inputsDir, "support-request.txt"), INPUT_TXT, "utf8");
   await writeFile(join(promptsDir, "classify.txt"), PROMPT_TXT, "utf8");
   await writeFile(join(outputsDir, "classify.json"), OUTPUT_JSON, "utf8");
