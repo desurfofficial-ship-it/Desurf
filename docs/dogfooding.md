@@ -103,3 +103,25 @@ node dist/cli.js test \
 - **FLAKY** classification logic is trustworthy; getting FLAKY from pure offline CLI is not expected.
 - **ERROR** is clearly distinct from assertion failure (message + exit 2).
 - Live **REGRESSION** is evidence about **model output vs contract**, not automatic evidence that the provider adapter is broken.
+
+## Milestone: v0.2 — Init onboarding improved (2026-08-28)
+
+Merged on `main` as `7bc52c9` (PR #2).
+
+Desurf `init` now scaffolds a realistic structured-output AI contract instead of the previous toy math / `required: "hello"` example.
+
+The generated workflow demonstrates:
+
+```
+input
+→ prompt
+→ recorded AI output
+→ assertions/schema
+→ deterministic PASS
+→ intentional REGRESSION
+→ restored PASS
+```
+
+The example remains offline-first and does not require a live provider.
+
+Verification: 91 tests green; init suite PASS (exit 0); mutated cassette → REGRESSION (exit 1); restored → PASS (exit 0).
