@@ -4,6 +4,7 @@
 
 import { writeFile, access, constants, stat, readFile } from "node:fs/promises";
 import { loadSuite } from "./offline.js";
+import { writeCassetteMeta } from "./fingerprint.js";
 import type { ModelAdapter, Suite, TestCase } from "./types.js";
 
 export type RecordOptions = {
@@ -61,6 +62,7 @@ async function recordOne(
     });
 
     await writeFile(testCase.outputPath, output.text, "utf8");
+    await writeCassetteMeta(testCase.outputPath, inputText, promptText);
 
     return {
       caseId: testCase.id,

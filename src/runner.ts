@@ -6,6 +6,7 @@
 import { readFile } from "node:fs/promises";
 import { evaluateTestCase } from "./engine.js";
 import { loadSuite } from "./offline.js";
+import { assertCassetteFresh } from "./fingerprint.js";
 import { SavedOutputAdapter } from "./provider.js";
 import { summarizeCase } from "./repeat.js";
 import type {
@@ -43,6 +44,11 @@ async function runOneExecution(
       readFile(testCase.input, "utf8"),
       readFile(testCase.prompt, "utf8"),
     ]);
+
+    // Stale-fixture check only applies offline (saved cassette evaluation).
+    if (provider instanceof SavedOutputAdapter) {
+      await assertCassetteFresh(testCase.outputPath, inputText, promptText);
+    }
 
     const output = await provider.execute({
       input: inputText,
