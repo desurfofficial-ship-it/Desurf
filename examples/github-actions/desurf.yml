@@ -1,0 +1,33 @@
+# Copy this workflow into your repository as .github/workflows/desurf.yml
+# Point --suite at your Desurf suite directory (commit cassettes + suite.json).
+#
+# Offline-only. No OPENROUTER_API_KEY. No live provider.
+# GitHub Actions fails the job on non-zero exit:
+#   0 = PASS
+#   1 = REGRESSION / FLAKY
+#   2 = ERROR (including stale fixture when meta is present)
+
+name: Desurf offline gate
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  desurf:
+    name: Offline regression gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Run Desurf suite (offline)
+        # Uses the published CLI. Replace ./desurf-suite with your suite path.
+        run: npx --yes @desurfofficial-ship-it/desurf test --suite ./desurf-suite
