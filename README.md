@@ -2,7 +2,7 @@
 
 **Offline-first CLI for testing AI prompt behavior and detecting regressions.**
 
-Version **0.1.1**
+Version **0.1.3**
 
 ## Install
 
@@ -15,7 +15,7 @@ npm install -g @desurfofficial-ship-it/desurf
 ```bash
 desurf init ./my-suite
 desurf test --suite ./my-suite
-desurf --version   # 0.1.1
+desurf --version   # 0.1.3
 ```
 
 ## Commands
