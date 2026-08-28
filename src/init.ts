@@ -13,6 +13,7 @@
 
 import { mkdir, writeFile, access, constants } from "node:fs/promises";
 import { resolve, basename, join } from "node:path";
+import { writeCassetteMeta } from "./fingerprint.js";
 
 const INPUT_TXT = `My app keeps crashing when I try to export a report. Error code: OPS-503.
 `;
@@ -112,7 +113,9 @@ export async function initSuite(targetDir: string): Promise<string> {
   await writeFile(suiteJson, buildSuiteJson(name), "utf8");
   await writeFile(join(inputsDir, "support-request.txt"), INPUT_TXT, "utf8");
   await writeFile(join(promptsDir, "classify.txt"), PROMPT_TXT, "utf8");
-  await writeFile(join(outputsDir, "classify.json"), OUTPUT_JSON, "utf8");
+  const outputPath = join(outputsDir, "classify.json");
+  await writeFile(outputPath, OUTPUT_JSON, "utf8");
+  await writeCassetteMeta(outputPath, INPUT_TXT, PROMPT_TXT);
 
   return abs;
 }
