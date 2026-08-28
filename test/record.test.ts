@@ -42,7 +42,7 @@ describe("desurf record", () => {
       force: true,
     });
     expect(summary.results[0].status).toBe("recorded");
-    const text = await readFile(join(suite, "outputs", "example.txt"), "utf8");
+    const text = await readFile(join(suite, "outputs", "classify.json"), "utf8");
     expect(text).toBe("captured-live-output");
   });
 
@@ -57,7 +57,7 @@ describe("desurf record", () => {
       force: false,
     });
     expect(summary.results[0].status).toBe("skipped");
-    const text = await readFile(join(suite, "outputs", "example.txt"), "utf8");
+    const text = await readFile(join(suite, "outputs", "classify.json"), "utf8");
     expect(text).not.toBe("should-not-write");
   });
 
@@ -72,14 +72,14 @@ describe("desurf record", () => {
       force: true,
     });
     expect(summary.results[0].status).toBe("recorded");
-    const text = await readFile(join(suite, "outputs", "example.txt"), "utf8");
+    const text = await readFile(join(suite, "outputs", "classify.json"), "utf8");
     expect(text).toBe("forced-new-content");
   });
 
   it("provider failure is reported per case", async () => {
     const suite = join(dir, "suite-fail");
     await initSuite(suite);
-    await writeFile(join(suite, "outputs", "example.txt"), "", "utf8");
+    await writeFile(join(suite, "outputs", "classify.json"), "", "utf8");
     const provider = new MockProvider("x", "OpenRouterAdapter: missing API key");
     const summary = await recordSuite({
       suitePath: suite,
