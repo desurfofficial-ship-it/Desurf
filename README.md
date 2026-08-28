@@ -62,6 +62,33 @@ Exit codes: **0** PASS · **1** REGRESSION/FLAKY · **2** ERROR
 
 Unknown assertion fields are rejected (exit 2).
 
+
+## CI (GitHub Actions)
+
+Desurf is designed for offline CI gating. Exit codes fail the job automatically:
+
+| Exit | Meaning | CI result |
+|------|---------|-----------|
+| 0 | PASS | green |
+| 1 | REGRESSION / FLAKY | red |
+| 2 | ERROR (config, missing files, stale fixture, …) | red |
+
+**This repository** builds the CLI from source and runs the offline fixture (no API keys):
+
+```bash
+npm install
+npm run build
+node dist/cli.js test --suite fixtures/basic
+```
+
+**Your application repository** can copy [`examples/github-actions/desurf.yml`](examples/github-actions/desurf.yml) and point `--suite` at your committed suite:
+
+```yaml
+- run: npx --yes @desurfofficial-ship-it/desurf test --suite ./desurf-suite
+```
+
+Never set `OPENROUTER_API_KEY` in the merge gate. Live providers are optional and manual only.
+
 ## Docs
 
 See `docs/cli-contract.md`, `docs/test-case-schema.md`, `docs/architecture.md`.
