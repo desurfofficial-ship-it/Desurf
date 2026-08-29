@@ -70,6 +70,29 @@ describe("CLI", () => {
     expect(r.stdout).toMatch(/--provider/i);
   });
 
+  it("seal --help exits 0", async () => {
+    const r = await runCli(["seal", "--help"]);
+    expect(r.code).toBe(0);
+    expect(r.stdout).toMatch(/--suite/i);
+    expect(r.stdout).toMatch(/provenance/i);
+  });
+
+  it("seal CLI seals unsealed suite and test passes", async () => {
+    const target = join(dir, "cli-seal-suite");
+    await runCli(["init", target]);
+    // remove sidecar
+    const metaFile = join(target, "outputs", "classify.json.desurf");
+    await rm(metaFile, { force: true });
+
+    const seal = await runCli(["seal", "--suite", target]);
+    expect(seal.code).toBe(0);
+    expect(seal.stdout).toMatch(/sealed/i);
+
+    const test = await runCli(["test", "--suite", target]);
+    expect(test.code).toBe(0);
+    expect(test.stdout).toMatch(/PASS/);
+  });
+
   it("init creates suite and test passes", async () => {
     const target = join(dir, "new-suite");
     const init = await runCli(["init", target]);

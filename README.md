@@ -30,29 +30,41 @@ desurf --version   # 0.2.0
 
 ## How offline testing works
 
-Offline mode **evaluates saved output fixtures**. It does **not** execute the prompt against a live model.
+Offline mode **evaluates saved output cassettes**. It does **not** execute the prompt against a live model.
 
 ```
 prompt + input
       ↓
-record / live provider   (optional — captures outputs)
+[desurf record (live provider)]  OR  [existing response + desurf seal (offline)]
       ↓
-saved output fixture
+fingerprinted cassette (.desurf sidecar with SHA-256 hashes)
       ↓
-desurf test (offline)    ← contract evaluation only
+desurf test (offline) ← evaluates behavioral contract deterministically
 ```
+
+### Establishing Cassette Provenance
+
+To protect against stale fixtures (e.g. editing a prompt but testing against old outputs), Desurf uses `.desurf` sidecar metadata containing SHA-256 hashes of the prompt and input:
+
+- **`desurf record`**: Obtains a response from a supported live provider (e.g. OpenRouter) and automatically creates the fingerprinted `.desurf` metadata.
+- **`desurf seal`**: Takes an existing output file on disk and establishes offline provenance by generating `.desurf` metadata from the current input and prompt files (no API keys, no network calls).
+- **`.desurf` sidecar**: Stores input/prompt hashes next to each cassette. If prompt or input files change without updating the cassette, `desurf test` fails with **ERROR (exit 2)**.
+- **Legacy suites**: Missing `.desurf` files remain supported for backwards compatibility, but do not provide stale-fixture protection.
 
 Typical workflow:
 
-1. Write prompt, input, and assertions (`desurf init` scaffolds this).
-2. Capture a known-good model response with `desurf record` (or write the fixture by hand).
-3. Run `desurf test --suite <path>` offline — deterministic, CI-friendly, no API keys.
+1. Define prompt, input, and assertions (`desurf init` scaffolds a runnable suite).
+2. Capture or seal a cassette:
+   - Use `desurf record --provider openrouter` with a live model, or
+   - Place an existing response file and run `desurf seal --suite <path>` offline.
+3. Run `desurf test --suite <path>` in CI/local — deterministic, zero API cost, exit codes 0 / 1 / 2.
 
 ## Commands
 
 - `desurf test --suite <path> [--verbose] [--json] [--repeat N] [--provider offline|openrouter]`
 - `desurf init <directory>` — scaffold a runnable structured-output example suite (refuses overwrite)
-- `desurf record --suite <path> --provider openrouter [--force] [--case id]` — capture live outputs
+- `desurf record --suite <path> --provider openrouter [--force] [--case id]` — capture live provider outputs
+- `desurf seal --suite <path> [--force] [--case id]` — establish offline provenance from existing output files
 
 Exit codes: **0** PASS · **1** REGRESSION/FLAKY · **2** ERROR
 

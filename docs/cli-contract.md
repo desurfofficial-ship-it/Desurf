@@ -3,13 +3,14 @@
 This document is part of the public surface of Desurf.  
 Do not change the exit-code meanings without explicit approval.
 
-## Primary command
+## Primary commands
 
-```bash
-desurf test
-```
+- `desurf test --suite <path>` — evaluate contract suite against saved cassettes (offline) or live model
+- `desurf init <directory>` — scaffold a new runnable suite
+- `desurf record --suite <path> --provider openrouter` — capture live model responses and generate `.desurf` metadata
+- `desurf seal --suite <path>` — establish offline cassette provenance (`.desurf` metadata) for existing output files
 
-## Options
+## Test options
 
 | Option | Meaning | Notes |
 |--------|---------|-------|
@@ -18,6 +19,14 @@ desurf test
 | `--repeat <n>` | Execute each selected case N times | Default 1 |
 | `--provider <name>` | `offline` (default) or `openrouter` | Offline uses saved outputs; openrouter is live |
 | `--model <id>` | Model id for live providers | Default for openrouter: `openai/gpt-4o-mini` |
+
+## Seal options
+
+| Option | Meaning | Notes |
+|--------|---------|-------|
+| `--suite <path>` | Path to a test suite directory or suite.json | Required |
+| `--case <id>` | Seal only the named test case | Optional |
+| `--force` | Overwrite existing `.desurf` metadata files | Optional (skips by default) |
 
 ## Environment
 

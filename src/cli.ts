@@ -11,6 +11,7 @@ import { createProvider } from "./create-provider.js";
 import { initSuite } from "./init.js";
 import { recordSuite } from "./record.js";
 import { runSuite } from "./runner.js";
+import { sealSuite } from "./seal.js";
 import type { CaseReliability } from "./types.js";
 import type { RunSummary } from "./runner.js";
 
@@ -45,6 +46,7 @@ Commands:
   test      Run a suite against offline saved outputs or a live provider
   init      Create a minimal runnable offline suite
   record    Capture live provider outputs into suite output files
+  seal      Establish offline cassette provenance from existing output files
 
 Global options:
   --version, -v    Print version and exit
@@ -134,6 +136,30 @@ Notes:
 Exit codes:
   0  all selected cases recorded or intentionally skipped
   2  configuration / provider / unknown-case error, or any case failed to record
+`);
+}
+
+function printSealHelp(): void {
+  console.log(`desurf seal — establish offline cassette provenance from existing outputs
+
+Usage:
+  desurf seal --suite <path> [options]
+
+Options:
+  --suite <path>       Path to suite directory (or suite.json) (required)
+  --case <id>          Seal only the named test case
+  --force              Overwrite existing .desurf metadata files
+  --help, -h           Show this help
+
+Notes:
+  - Purely offline. No provider, model, or API key required.
+  - Hashes current input and prompt files and writes <outputPath>.desurf sidecar.
+  - Requires existing output files on disk.
+  - Existing metadata files are skipped unless --force is set.
+
+Exit codes:
+  0  all selected cases sealed or intentionally skipped
+  2  configuration / file error, or any case failed to seal
 `);
 }
 
@@ -449,6 +475,42 @@ async function cmdRecord(parsed: ParsedArgs): Promise<number> {
   }
 }
 
+async function cmdSeal(parsed: ParsedArgs): Promise<number> {
+  if (parsed.help) {
+    printSealHelp();
+    return 0;
+  }
+  if (!parsed.suite) {
+    console.error("Missing required option: --suite <path>");
+    printSealHelp();
+    return 2;
+  }
+
+  try {
+    const summary = await sealSuite({
+      suitePath: resolve(parsed.suite),
+      caseId: parsed.caseId,
+      force: parsed.force,
+    });
+
+    console.log(`Desurf seal \u2014 suite "${summary.suiteName}"\n`);
+    let anyError = false;
+    for (const r of summary.results) {
+      const mark =
+        r.status === "sealed" ? "\u2713" : r.status === "skipped" ? "\u00b7" : "\u2717";
+      console.log(`${mark} ${r.caseId}: ${r.status}`);
+      console.log(`  ${r.message}`);
+      console.log();
+      if (r.status === "error") anyError = true;
+    }
+
+    return anyError ? 2 : 0;
+  } catch (err) {
+    console.error(err instanceof Error ? err.message : String(err));
+    return 2;
+  }
+}
+
 async function main(): Promise<number> {
   let parsed: ParsedArgs;
   try {
@@ -466,7 +528,7 @@ async function main(): Promise<number> {
 
   if (
     parsed.command === "help" ||
-    (parsed.help && !["test", "init", "record"].includes(parsed.command))
+    (parsed.help && !["test", "init", "record", "seal"].includes(parsed.command))
   ) {
     printRootHelp();
     return 0;
@@ -479,6 +541,8 @@ async function main(): Promise<number> {
       return cmdInit(parsed);
     case "record":
       return cmdRecord(parsed);
+    case "seal":
+      return cmdSeal(parsed);
     default:
       console.error(`Unknown command: ${parsed.command}`);
       printRootHelp();

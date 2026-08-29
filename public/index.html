@@ -1,0 +1,693 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Desurf — Prompt Behavioral Regression Testing</title>
+  <meta name="description" content="Offline-first prompt regression testing framework and suite runner for LLMs">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    body {
+      font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+      background-color: #0c0f17;
+      color: #e2e8f0;
+    }
+    pre, code, .font-mono {
+      font-family: 'JetBrains Mono', monospace;
+    }
+    .custom-scrollbar::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-track {
+      background: #111827;
+    }
+    .custom-scrollbar::-webkit-scrollbar-thumb {
+      background: #374151;
+      border-radius: 3px;
+    }
+  </style>
+</head>
+<body class="min-h-screen flex flex-col antialiased">
+  <!-- Top Navigation -->
+  <header class="border-b border-slate-800 bg-[#0f1422]/90 backdrop-blur sticky top-0 z-50">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+      <div class="flex items-center space-x-3">
+        <div class="w-9 h-9 rounded-lg bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 font-bold text-lg shadow-sm">
+          ∇
+        </div>
+        <div>
+          <div class="flex items-center space-x-2">
+            <span class="font-bold text-lg tracking-tight text-white">Desurf</span>
+            <span class="text-[11px] font-mono px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">v0.2.0</span>
+            <span class="text-[11px] font-mono px-2 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20">Offline-First</span>
+          </div>
+          <p class="text-xs text-slate-400">Prompt Behavioral Testing & Regression Detection</p>
+        </div>
+      </div>
+
+      <div class="flex items-center space-x-2">
+        <button id="tab-runner-btn" onclick="switchTab('runner')" class="px-3.5 py-1.5 rounded-md text-sm font-medium transition bg-slate-800 text-white border border-slate-700">
+          Suite Runner
+        </button>
+        <button id="tab-inspector-btn" onclick="switchTab('inspector')" class="px-3.5 py-1.5 rounded-md text-sm font-medium transition text-slate-400 hover:text-white hover:bg-slate-800/60">
+          Suite Explorer
+        </button>
+        <button id="tab-cli-btn" onclick="switchTab('cli')" class="px-3.5 py-1.5 rounded-md text-sm font-medium transition text-slate-400 hover:text-white hover:bg-slate-800/60 flex items-center space-x-1.5">
+          <span>Terminal</span>
+          <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+        </button>
+        <button id="tab-init-btn" onclick="switchTab('init')" class="px-3.5 py-1.5 rounded-md text-sm font-medium transition text-slate-400 hover:text-white hover:bg-slate-800/60">
+          + New Suite
+        </button>
+        <button id="tab-docs-btn" onclick="switchTab('docs')" class="px-3.5 py-1.5 rounded-md text-sm font-medium transition text-slate-400 hover:text-white hover:bg-slate-800/60">
+          Contracts & Specs
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Container -->
+  <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
+
+    <!-- TAB 1: RUNNER -->
+    <section id="view-runner" class="space-y-6">
+      <!-- Top Control Bar -->
+      <div class="bg-[#13192b] border border-slate-800 rounded-xl p-5 shadow-lg">
+        <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 flex-1">
+            <!-- Suite Selector -->
+            <div>
+              <label class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5">Test Suite</label>
+              <select id="run-suite-select" onchange="onSuiteSelectChange()" class="w-full bg-[#0a0d14] border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-emerald-500">
+                <option value="fixtures/basic">fixtures/basic (Default)</option>
+                <option value="examples/support-agent">examples/support-agent (Full Contract)</option>
+              </select>
+            </div>
+
+            <!-- Case Filter -->
+            <div>
+              <label class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5">Target Case</label>
+              <select id="run-case-select" class="w-full bg-[#0a0d14] border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-emerald-500">
+                <option value="">All Cases in Suite</option>
+              </select>
+            </div>
+
+            <!-- Provider & Repeats -->
+            <div class="flex space-x-2">
+              <div class="flex-1">
+                <label class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5">Provider</label>
+                <select id="run-provider-select" class="w-full bg-[#0a0d14] border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-emerald-500">
+                  <option value="offline">offline (Saved Cassettes)</option>
+                  <option value="openrouter">openrouter (Live Model)</option>
+                </select>
+              </div>
+              <div class="w-24">
+                <label class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5">Repeat (N)</label>
+                <input id="run-repeat-input" type="number" min="1" max="20" value="3" class="w-full bg-[#0a0d14] border border-slate-700 rounded-lg px-3 py-2 text-sm text-center text-slate-200 focus:outline-none focus:border-emerald-500" />
+              </div>
+            </div>
+          </div>
+
+          <div class="flex items-end">
+            <button id="run-btn" onclick="executeRunSuite()" class="w-full lg:w-auto px-6 py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-sm transition shadow-md shadow-emerald-950 flex items-center justify-center space-x-2">
+              <span id="run-btn-spinner" class="hidden animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full"></span>
+              <span id="run-btn-text">Execute Suite</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Results Summary Bar -->
+      <div id="results-banner" class="hidden">
+        <div id="results-banner-container" class="rounded-xl border p-5 transition">
+          <div class="flex flex-wrap items-center justify-between gap-4">
+            <div class="flex items-center space-x-4">
+              <div id="results-status-badge" class="px-3.5 py-1 rounded-full font-mono text-sm font-bold tracking-wide">
+                PASS
+              </div>
+              <div>
+                <h3 id="results-suite-name" class="font-bold text-white text-base">Suite: fixtures/basic</h3>
+                <p id="results-timestamp" class="text-xs text-slate-400 font-mono">Executed at just now</p>
+              </div>
+            </div>
+
+            <div class="flex items-center space-x-4 text-sm font-mono">
+              <div class="px-3 py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 flex items-center space-x-2">
+                <span>PASS</span>
+                <span id="count-passed" class="font-bold">0</span>
+              </div>
+              <div class="px-3 py-1.5 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-400 flex items-center space-x-2">
+                <span>FLAKY</span>
+                <span id="count-flaky" class="font-bold">0</span>
+              </div>
+              <div class="px-3 py-1.5 rounded-lg bg-rose-500/10 border border-rose-500/20 text-rose-400 flex items-center space-x-2">
+                <span>REGRESSION</span>
+                <span id="count-regression" class="font-bold">0</span>
+              </div>
+              <div class="px-3 py-1.5 rounded-lg bg-purple-500/10 border border-purple-500/20 text-purple-400 flex items-center space-x-2">
+                <span>ERROR</span>
+                <span id="count-errors" class="font-bold">0</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Case Execution Cards -->
+      <div id="cases-container" class="space-y-4">
+        <div class="bg-[#13192b]/60 border border-slate-800 rounded-xl p-8 text-center text-slate-400">
+          <div class="w-12 h-12 rounded-full bg-slate-800/80 border border-slate-700 flex items-center justify-center mx-auto mb-3 text-slate-300 font-bold">
+            ▶
+          </div>
+          <h4 class="text-slate-200 font-semibold text-base mb-1">No execution in progress</h4>
+          <p class="text-sm text-slate-400 max-w-md mx-auto">Click "Execute Suite" to test behavioral contracts and detect regressions across repeated runs.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 2: SUITE EXPLORER -->
+    <section id="view-inspector" class="hidden space-y-6">
+      <div class="flex items-center justify-between">
+        <div>
+          <h2 class="text-lg font-bold text-white">Suite Contract Inspector</h2>
+          <p class="text-xs text-slate-400">Examine prompts, input fixtures, recorded cassettes, and assertion definitions</p>
+        </div>
+        <button onclick="loadSuitesData()" class="px-3 py-1.5 rounded bg-slate-800 hover:bg-slate-700 text-xs text-slate-300 border border-slate-700">
+          ↻ Refresh Suites
+        </button>
+      </div>
+
+      <div id="suite-inspector-content" class="space-y-6">
+        <!-- populated dynamically -->
+      </div>
+    </section>
+
+    <!-- TAB 3: CLI TERMINAL -->
+    <section id="view-cli" class="hidden space-y-6">
+      <div class="bg-[#13192b] border border-slate-800 rounded-xl p-5">
+        <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-4">
+          <div>
+            <h2 class="text-lg font-bold text-white">Desurf CLI Interactive Terminal</h2>
+            <p class="text-xs text-slate-400 font-mono">Exit codes: 0 = PASS, 1 = REGRESSION/FLAKY, 2 = ERROR</p>
+          </div>
+
+          <div class="flex flex-wrap gap-2">
+            <button onclick="setCliCmd('test --suite fixtures/basic --repeat 3')" class="px-2.5 py-1 text-xs rounded bg-slate-800 hover:bg-slate-700 text-slate-300 font-mono border border-slate-700">
+              test --repeat 3
+            </button>
+            <button onclick="setCliCmd('test --suite examples/support-agent --json')" class="px-2.5 py-1 text-xs rounded bg-slate-800 hover:bg-slate-700 text-slate-300 font-mono border border-slate-700">
+              test --json
+            </button>
+            <button onclick="setCliCmd('--help')" class="px-2.5 py-1 text-xs rounded bg-slate-800 hover:bg-slate-700 text-slate-300 font-mono border border-slate-700">
+              --help
+            </button>
+            <button onclick="setCliCmd('--version')" class="px-2.5 py-1 text-xs rounded bg-slate-800 hover:bg-slate-700 text-slate-300 font-mono border border-slate-700">
+              --version
+            </button>
+          </div>
+        </div>
+
+        <div class="flex space-x-2">
+          <div class="relative flex-1">
+            <span class="absolute left-3.5 top-2.5 text-slate-500 font-mono text-sm select-none">desurf</span>
+            <input id="cli-input" type="text" value="test --suite fixtures/basic --repeat 3" class="w-full bg-[#0a0d14] border border-slate-700 rounded-lg pl-20 pr-4 py-2 text-sm font-mono text-emerald-400 focus:outline-none focus:border-emerald-500" onkeydown="if(event.key==='Enter') runCliCommand()" />
+          </div>
+          <button onclick="runCliCommand()" class="px-5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-sm transition">
+            Run
+          </button>
+        </div>
+      </div>
+
+      <!-- Terminal Output Window -->
+      <div class="bg-[#0a0d14] border border-slate-800 rounded-xl overflow-hidden shadow-2xl font-mono text-xs">
+        <div class="bg-[#0f1422] border-b border-slate-800 px-4 py-2.5 flex items-center justify-between">
+          <div class="flex items-center space-x-2">
+            <span class="w-3 h-3 rounded-full bg-rose-500/80 inline-block"></span>
+            <span class="w-3 h-3 rounded-full bg-amber-500/80 inline-block"></span>
+            <span class="w-3 h-3 rounded-full bg-emerald-500/80 inline-block"></span>
+            <span class="text-slate-400 ml-2">stdout / stderr</span>
+          </div>
+          <span id="cli-exit-code-badge" class="px-2 py-0.5 rounded text-[10px] bg-slate-800 text-slate-400">Ready</span>
+        </div>
+        <pre id="cli-output" class="p-4 text-slate-300 whitespace-pre-wrap leading-relaxed max-h-[500px] overflow-y-auto custom-scrollbar">Desurf CLI Terminal Ready.
+Type any desurf command above and press Enter.
+
+Try: test --suite fixtures/basic --repeat 3
+</pre>
+      </div>
+    </section>
+
+    <!-- TAB 4: INIT NEW SUITE -->
+    <section id="view-init" class="hidden space-y-6">
+      <div class="bg-[#13192b] border border-slate-800 rounded-xl p-6 max-w-2xl mx-auto">
+        <h2 class="text-lg font-bold text-white mb-1">Create a New Test Suite (<code class="text-emerald-400 text-sm">desurf init</code>)</h2>
+        <p class="text-xs text-slate-400 mb-6">Scaffolds an offline-first contract suite with inputs, prompt templates, cassette outputs, and schema assertions.</p>
+
+        <form onsubmit="executeInitSuite(event)" class="space-y-4">
+          <div>
+            <label class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5">Target Directory</label>
+            <input id="init-dir-input" type="text" placeholder="fixtures/my-agent-suite" class="w-full bg-[#0a0d14] border border-slate-700 rounded-lg px-3.5 py-2 text-sm text-slate-200 focus:outline-none focus:border-emerald-500 font-mono" required />
+            <p class="text-[11px] text-slate-500 mt-1">Directory must be new to prevent overwriting existing contracts.</p>
+          </div>
+
+          <div class="p-4 rounded-lg bg-[#0a0d14] border border-slate-800 font-mono text-xs text-slate-400 space-y-1">
+            <p class="text-slate-300 font-semibold mb-2">Scaffolded Layout:</p>
+            <p class="text-emerald-400">&lt;dir&gt;/suite.json</p>
+            <p>&lt;dir&gt;/inputs/support-request.txt</p>
+            <p>&lt;dir&gt;/prompts/classify.txt</p>
+            <p>&lt;dir&gt;/outputs/classify.json</p>
+          </div>
+
+          <div id="init-status-msg" class="hidden text-xs p-3 rounded-lg"></div>
+
+          <button type="submit" class="w-full py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-sm transition">
+            Initialize Suite
+          </button>
+        </form>
+      </div>
+    </section>
+
+    <!-- TAB 5: DOCS -->
+    <section id="view-docs" class="hidden space-y-6 max-w-4xl mx-auto">
+      <div class="bg-[#13192b] border border-slate-800 rounded-xl p-6 space-y-6">
+        <div>
+          <h2 class="text-xl font-bold text-white mb-2">Desurf Behavioral Contract Specification</h2>
+          <p class="text-sm text-slate-300 leading-relaxed">
+            AI outputs surf on the surface. <strong class="text-emerald-400">Desurf</strong> checks what is underneath — the behavioral contract. Traditional software tests expect identical output; LLMs produce variations. Desurf tests explicit behavioral assertions across repeated executions.
+          </p>
+        </div>
+
+        <div class="border-t border-slate-800 pt-6">
+          <h3 class="text-base font-semibold text-white mb-3">Supported Assertions</h3>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs font-mono">
+            <div class="p-4 rounded-lg bg-[#0a0d14] border border-slate-800">
+              <div class="text-emerald-400 font-bold mb-1">required</div>
+              <p class="text-slate-400 font-sans mb-2">Asserts output contains a substring.</p>
+              <pre class="text-slate-300">{ "type": "required", "value": "billing" }</pre>
+            </div>
+            <div class="p-4 rounded-lg bg-[#0a0d14] border border-slate-800">
+              <div class="text-emerald-400 font-bold mb-1">forbidden</div>
+              <p class="text-slate-400 font-sans mb-2">Asserts output NEVER contains substring (e.g. AI leaks).</p>
+              <pre class="text-slate-300">{ "type": "forbidden", "value": "I am an AI" }</pre>
+            </div>
+            <div class="p-4 rounded-lg bg-[#0a0d14] border border-slate-800">
+              <div class="text-emerald-400 font-bold mb-1">regex</div>
+              <p class="text-slate-400 font-sans mb-2">Asserts output matches regular expression pattern.</p>
+              <pre class="text-slate-300">{ "type": "regex", "pattern": "\"category\"\\s*:\\s*\"billing\"" }</pre>
+            </div>
+            <div class="p-4 rounded-lg bg-[#0a0d14] border border-slate-800">
+              <div class="text-emerald-400 font-bold mb-1">json_schema</div>
+              <p class="text-slate-400 font-sans mb-2">Asserts output is valid JSON matching structural schema.</p>
+              <pre class="text-slate-300">{ "type": "json_schema", "schema": { "required": ["category"] } }</pre>
+            </div>
+          </div>
+        </div>
+
+        <div class="border-t border-slate-800 pt-6">
+          <h3 class="text-base font-semibold text-white mb-3">Exit Code Contract (CI Integration)</h3>
+          <div class="space-y-2 text-xs font-mono">
+            <div class="flex items-center space-x-3 p-2.5 rounded bg-emerald-950/20 border border-emerald-800/30 text-emerald-300">
+              <span class="font-bold px-2 py-0.5 rounded bg-emerald-500/20">0</span>
+              <span>PASS — All assertions pass across all test cases and repeated executions</span>
+            </div>
+            <div class="flex items-center space-x-3 p-2.5 rounded bg-rose-950/20 border border-rose-800/30 text-rose-300">
+              <span class="font-bold px-2 py-0.5 rounded bg-rose-500/20">1</span>
+              <span>REGRESSION / FLAKY — Quality gate failure (assertion violations or nondeterminism)</span>
+            </div>
+            <div class="flex items-center space-x-3 p-2.5 rounded bg-purple-950/20 border border-purple-800/30 text-purple-300">
+              <span class="font-bold px-2 py-0.5 rounded bg-purple-500/20">2</span>
+              <span>ERROR — Tool, configuration, missing file, or provider timeout failure</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <footer class="border-t border-slate-800 py-4 px-6 text-center text-xs text-slate-500 font-mono">
+    Desurf • Offline-First Prompt Testing Framework • <a href="https://github.com/desurfofficial-ship-it/Desurf" target="_blank" class="hover:text-emerald-400 underline">GitHub</a>
+  </footer>
+
+  <script>
+    let allSuites = [];
+
+    function switchTab(tabId) {
+      const tabs = ['runner', 'inspector', 'cli', 'init', 'docs'];
+      tabs.forEach(t => {
+        const view = document.getElementById('view-' + t);
+        const btn = document.getElementById('tab-' + t + '-btn');
+        if (view) view.classList.toggle('hidden', t !== tabId);
+        if (btn) {
+          if (t === tabId) {
+            btn.className = "px-3.5 py-1.5 rounded-md text-sm font-medium transition bg-slate-800 text-white border border-slate-700";
+          } else {
+            btn.className = "px-3.5 py-1.5 rounded-md text-sm font-medium transition text-slate-400 hover:text-white hover:bg-slate-800/60";
+          }
+        }
+      });
+      if (tabId === 'inspector') {
+        loadSuitesData();
+      }
+    }
+
+    async function loadSuitesData() {
+      try {
+        const res = await fetch('/api/suites');
+        const data = await res.json();
+        allSuites = data.suites || [];
+
+        const sel = document.getElementById('run-suite-select');
+        const currentVal = sel.value;
+        sel.innerHTML = allSuites.map(s => `<option value="${s.path}">${s.path} (${s.name})</option>`).join('');
+        if (allSuites.some(s => s.path === currentVal)) {
+          sel.value = currentVal;
+        }
+        onSuiteSelectChange();
+
+        renderInspector();
+      } catch (err) {
+        console.error('Failed to load suites', err);
+      }
+    }
+
+    function onSuiteSelectChange() {
+      const suitePath = document.getElementById('run-suite-select').value;
+      const suite = allSuites.find(s => s.path === suitePath);
+      const caseSelect = document.getElementById('run-case-select');
+      if (!suite || !suite.cases) {
+        caseSelect.innerHTML = '<option value="">All Cases in Suite</option>';
+        return;
+      }
+      caseSelect.innerHTML = '<option value="">All Cases in Suite</option>' +
+        suite.cases.map(c => `<option value="${c.id}">${c.id}</option>`).join('');
+    }
+
+    async function executeRunSuite() {
+      const suitePath = document.getElementById('run-suite-select').value;
+      const caseId = document.getElementById('run-case-select').value;
+      const provider = document.getElementById('run-provider-select').value;
+      const repeat = document.getElementById('run-repeat-input').value;
+
+      const btn = document.getElementById('run-btn');
+      const spinner = document.getElementById('run-btn-spinner');
+      const text = document.getElementById('run-btn-text');
+
+      btn.disabled = true;
+      spinner.classList.remove('hidden');
+      text.textContent = 'Running Suite...';
+
+      try {
+        const res = await fetch('/api/run', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ suitePath, caseId, provider, repeat }),
+        });
+
+        const data = await res.json();
+        renderRunResults(data);
+      } catch (err) {
+        alert('Run failed: ' + err.message);
+      } finally {
+        btn.disabled = false;
+        spinner.classList.add('hidden');
+        text.textContent = 'Execute Suite';
+      }
+    }
+
+    function renderRunResults(data) {
+      const banner = document.getElementById('results-banner');
+      const bannerContainer = document.getElementById('results-banner-container');
+      const statusBadge = document.getElementById('results-status-badge');
+      const suiteName = document.getElementById('results-suite-name');
+      const timestamp = document.getElementById('results-timestamp');
+
+      banner.classList.remove('hidden');
+      timestamp.textContent = 'Executed at ' + new Date().toLocaleTimeString();
+
+      if (data.error) {
+        statusBadge.textContent = 'ERROR';
+        statusBadge.className = 'px-3.5 py-1 rounded-full font-mono text-sm font-bold tracking-wide bg-purple-500/20 text-purple-400 border border-purple-500/30';
+        bannerContainer.className = 'rounded-xl border border-purple-500/30 bg-purple-950/20 p-5';
+        document.getElementById('cases-container').innerHTML = `
+          <div class="p-4 rounded-xl bg-purple-950/30 border border-purple-800 text-purple-200 font-mono text-xs">
+            ${escapeHtml(data.error)}
+          </div>
+        `;
+        return;
+      }
+
+      const summary = data.summary;
+      suiteName.textContent = 'Suite: ' + summary.suiteName;
+      document.getElementById('count-passed').textContent = summary.passed;
+      document.getElementById('count-flaky').textContent = summary.flaky;
+      document.getElementById('count-regression').textContent = summary.regression;
+      document.getElementById('count-errors').textContent = summary.errors;
+
+      const state = data.status;
+      statusBadge.textContent = state;
+
+      if (state === 'PASS') {
+        statusBadge.className = 'px-3.5 py-1 rounded-full font-mono text-sm font-bold tracking-wide bg-emerald-500/20 text-emerald-400 border border-emerald-500/30';
+        bannerContainer.className = 'rounded-xl border border-emerald-500/30 bg-emerald-950/10 p-5';
+      } else if (state === 'FLAKY') {
+        statusBadge.className = 'px-3.5 py-1 rounded-full font-mono text-sm font-bold tracking-wide bg-amber-500/20 text-amber-400 border border-amber-500/30';
+        bannerContainer.className = 'rounded-xl border border-amber-500/30 bg-amber-950/10 p-5';
+      } else if (state === 'REGRESSION') {
+        statusBadge.className = 'px-3.5 py-1 rounded-full font-mono text-sm font-bold tracking-wide bg-rose-500/20 text-rose-400 border border-rose-500/30';
+        bannerContainer.className = 'rounded-xl border border-rose-500/30 bg-rose-950/10 p-5';
+      } else {
+        statusBadge.className = 'px-3.5 py-1 rounded-full font-mono text-sm font-bold tracking-wide bg-purple-500/20 text-purple-400 border border-purple-500/30';
+        bannerContainer.className = 'rounded-xl border border-purple-500/30 bg-purple-950/10 p-5';
+      }
+
+      const container = document.getElementById('cases-container');
+      container.innerHTML = summary.cases.map(c => {
+        const isPass = c.state === 'PASS';
+        const isFlaky = c.state === 'FLAKY';
+        const isReg = c.state === 'REGRESSION';
+        const badgeColor = isPass ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+          : isFlaky ? 'bg-amber-500/10 text-amber-400 border-amber-500/20'
+          : isReg ? 'bg-rose-500/10 text-rose-400 border-rose-500/20'
+          : 'bg-purple-500/10 text-purple-400 border-purple-500/20';
+
+        const executionsHtml = c.executions.map((e, idx) => {
+          const passFail = e.passed ? '<span class="text-emerald-400">✓ Pass</span>' : '<span class="text-rose-400">✗ Fail</span>';
+          const assertionsHtml = (e.assertionResults || []).map(a => `
+            <div class="flex items-start space-x-2 text-xs font-mono py-1 border-t border-slate-800/60">
+              <span class="${a.passed ? 'text-emerald-400' : 'text-rose-400'} font-bold">${a.passed ? '✓' : '✗'}</span>
+              <span class="text-slate-300 font-semibold">${escapeHtml(a.assertion.type)}:</span>
+              <span class="text-slate-400 flex-1">${escapeHtml(a.message)}</span>
+            </div>
+          `).join('');
+
+          return `
+            <div class="p-3 rounded-lg bg-[#0a0d14] border border-slate-800 space-y-2">
+              <div class="flex items-center justify-between text-xs font-mono">
+                <span class="text-slate-400">Run #${idx + 1}</span>
+                ${passFail}
+              </div>
+              ${e.error ? `<div class="text-xs text-rose-400 font-mono bg-rose-950/20 p-2 rounded">${escapeHtml(e.error)}</div>` : ''}
+              <div class="space-y-1">${assertionsHtml}</div>
+              ${e.outputPreview ? `
+                <div class="pt-2 border-t border-slate-800">
+                  <div class="text-[11px] text-slate-500 mb-1">Model Output Preview:</div>
+                  <pre class="text-[11px] font-mono text-slate-300 bg-slate-900/80 p-2 rounded max-h-28 overflow-y-auto whitespace-pre-wrap">${escapeHtml(e.outputPreview)}</pre>
+                </div>
+              ` : ''}
+            </div>
+          `;
+        }).join('');
+
+        return `
+          <div class="bg-[#13192b] border border-slate-800 rounded-xl p-5 space-y-4">
+            <div class="flex items-center justify-between">
+              <div class="flex items-center space-x-3">
+                <span class="font-mono text-base font-bold text-white">${escapeHtml(c.caseId)}</span>
+                <span class="px-2.5 py-0.5 rounded text-xs font-mono font-semibold border ${badgeColor}">${c.state}</span>
+              </div>
+              <div class="text-xs font-mono text-slate-400">
+                ${c.passCount}/${c.executions.length} passed
+              </div>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-${Math.min(c.executions.length, 3)} gap-3">
+              ${executionsHtml}
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    async function renderInspector() {
+      const container = document.getElementById('suite-inspector-content');
+      container.innerHTML = '<div class="text-slate-400 text-sm animate-pulse">Loading suite definitions...</div>';
+
+      const suiteCards = await Promise.all(allSuites.map(async s => {
+        try {
+          const res = await fetch('/api/suite-detail?path=' + encodeURIComponent(s.path));
+          const detail = await res.json();
+
+          const casesHtml = detail.cases.map(c => `
+            <div class="p-4 rounded-lg bg-[#0a0d14] border border-slate-800 space-y-3">
+              <div class="flex items-center justify-between">
+                <span class="font-mono font-bold text-sm text-emerald-400">${escapeHtml(c.id)}</span>
+                <span class="text-xs text-slate-500 font-mono">${c.assertions.length} assertions</span>
+              </div>
+
+              <div class="grid grid-cols-1 lg:grid-cols-3 gap-3 text-xs font-mono">
+                <div class="p-3 rounded bg-slate-900/90 border border-slate-800">
+                  <div class="text-slate-400 font-semibold mb-1 flex items-center justify-between">
+                    <span>Input: ${escapeHtml(c.input.path)}</span>
+                    ${c.input.exists ? '<span class="text-emerald-400">✓</span>' : '<span class="text-rose-400">✗ missing</span>'}
+                  </div>
+                  <pre class="text-slate-300 whitespace-pre-wrap max-h-32 overflow-y-auto">${escapeHtml(c.input.content)}</pre>
+                </div>
+
+                <div class="p-3 rounded bg-slate-900/90 border border-slate-800">
+                  <div class="text-slate-400 font-semibold mb-1 flex items-center justify-between">
+                    <span>Prompt: ${escapeHtml(c.prompt.path)}</span>
+                    ${c.prompt.exists ? '<span class="text-emerald-400">✓</span>' : '<span class="text-rose-400">✗ missing</span>'}
+                  </div>
+                  <pre class="text-slate-300 whitespace-pre-wrap max-h-32 overflow-y-auto">${escapeHtml(c.prompt.content)}</pre>
+                </div>
+
+                <div class="p-3 rounded bg-slate-900/90 border border-slate-800">
+                  <div class="text-slate-400 font-semibold mb-1 flex items-center justify-between">
+                    <span>Saved Output: ${escapeHtml(c.output.path)}</span>
+                    ${c.output.exists ? '<span class="text-emerald-400">✓</span>' : '<span class="text-rose-400">✗ missing</span>'}
+                  </div>
+                  <pre class="text-slate-300 whitespace-pre-wrap max-h-32 overflow-y-auto">${escapeHtml(c.output.content)}</pre>
+                </div>
+              </div>
+
+              <div class="pt-2 border-t border-slate-800/80">
+                <span class="text-[11px] text-slate-400 font-semibold block mb-1.5">Behavioral Assertions:</span>
+                <div class="flex flex-wrap gap-2">
+                  ${c.assertions.map(a => `
+                    <span class="px-2 py-1 rounded bg-slate-800/90 border border-slate-700 text-slate-300 text-xs font-mono">
+                      <strong class="text-emerald-400">${escapeHtml(a.type)}</strong>: ${escapeHtml(a.value ? JSON.stringify(a.value) : a.pattern ? a.pattern : 'schema')}
+                    </span>
+                  `).join('')}
+                </div>
+              </div>
+            </div>
+          `).join('');
+
+          return `
+            <div class="bg-[#13192b] border border-slate-800 rounded-xl p-5 space-y-4">
+              <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+                <div>
+                  <h3 class="font-bold text-white text-base">${escapeHtml(detail.name)}</h3>
+                  <p class="text-xs font-mono text-slate-400">${escapeHtml(detail.path)}</p>
+                </div>
+                <button onclick="runSpecificSuite('${escapeHtml(detail.path)}')" class="px-3 py-1.5 rounded-md bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold">
+                  Execute This Suite
+                </button>
+              </div>
+              <div class="space-y-3">${casesHtml}</div>
+            </div>
+          `;
+        } catch {
+          return '';
+        }
+      }));
+
+      container.innerHTML = suiteCards.filter(Boolean).join('');
+    }
+
+    function runSpecificSuite(path) {
+      document.getElementById('run-suite-select').value = path;
+      onSuiteSelectChange();
+      switchTab('runner');
+      executeRunSuite();
+    }
+
+    function setCliCmd(cmd) {
+      document.getElementById('cli-input').value = cmd;
+      runCliCommand();
+    }
+
+    async function runCliCommand() {
+      const input = document.getElementById('cli-input');
+      const out = document.getElementById('cli-output');
+      const badge = document.getElementById('cli-exit-code-badge');
+      const cmd = input.value.trim();
+      if (!cmd) return;
+
+      badge.textContent = 'Running...';
+      badge.className = 'px-2 py-0.5 rounded text-[10px] bg-amber-500/20 text-amber-400 font-mono';
+      out.textContent = `$ desurf ${cmd}\n...`;
+
+      try {
+        const res = await fetch('/api/cli', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ command: cmd }),
+        });
+        const data = await res.json();
+        let display = `$ desurf ${cmd}\n`;
+        if (data.stdout) display += data.stdout;
+        if (data.stderr) display += (data.stdout ? '\n' : '') + data.stderr;
+        out.textContent = display;
+
+        const code = data.code ?? 0;
+        badge.textContent = 'Exit code: ' + code;
+        badge.className = code === 0
+          ? 'px-2 py-0.5 rounded text-[10px] bg-emerald-500/20 text-emerald-400 font-mono font-bold'
+          : code === 1
+          ? 'px-2 py-0.5 rounded text-[10px] bg-rose-500/20 text-rose-400 font-mono font-bold'
+          : 'px-2 py-0.5 rounded text-[10px] bg-purple-500/20 text-purple-400 font-mono font-bold';
+      } catch (err) {
+        out.textContent = `$ desurf ${cmd}\nError: ${err.message}`;
+        badge.textContent = 'Exit code: 2';
+        badge.className = 'px-2 py-0.5 rounded text-[10px] bg-purple-500/20 text-purple-400 font-mono font-bold';
+      }
+    }
+
+    async function executeInitSuite(e) {
+      e.preventDefault();
+      const dir = document.getElementById('init-dir-input').value.trim();
+      const msg = document.getElementById('init-status-msg');
+      msg.className = 'text-xs p-3 rounded-lg bg-slate-800 text-slate-300 block';
+      msg.textContent = 'Creating suite...';
+
+      try {
+        const res = await fetch('/api/init', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ dir }),
+        });
+        const data = await res.json();
+        if (data.error) {
+          msg.className = 'text-xs p-3 rounded-lg bg-rose-950/50 border border-rose-800 text-rose-300 block';
+          msg.textContent = 'Error: ' + data.error;
+        } else {
+          msg.className = 'text-xs p-3 rounded-lg bg-emerald-950/50 border border-emerald-800 text-emerald-300 block';
+          msg.textContent = '✓ Suite created at ' + data.path + '! You can now execute it.';
+          loadSuitesData();
+        }
+      } catch (err) {
+        msg.className = 'text-xs p-3 rounded-lg bg-rose-950/50 border border-rose-800 text-rose-300 block';
+        msg.textContent = 'Failed: ' + err.message;
+      }
+    }
+
+    function escapeHtml(str) {
+      if (str === null || str === undefined) return '';
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+    }
+
+    loadSuitesData();
+  </script>
+</body>
+</html>
