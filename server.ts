@@ -4,11 +4,11 @@ import { existsSync } from "node:fs";
 import { join, resolve, relative } from "node:path";
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
-import { runSuite } from "./dist/runner.js";
-import { initSuite } from "./dist/init.js";
-import { recordSuite } from "./dist/record.js";
-import { createProvider } from "./dist/create-provider.js";
-import { loadSuite } from "./dist/offline.js";
+import { runSuite } from "./src/runner.js";
+import { initSuite } from "./src/init.js";
+import { recordSuite } from "./src/record.js";
+import { createProvider } from "./src/create-provider.js";
+import { loadSuite } from "./src/offline.js";
 import type { Suite } from "./src/types.js";
 
 const execAsync = promisify(exec);
