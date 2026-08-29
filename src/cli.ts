@@ -33,7 +33,7 @@ function getVersion(): string {
   } catch {
     // fall through
   }
-  return "0.1.1";
+  return "0.3.0";
 }
 
 function printRootHelp(): void {

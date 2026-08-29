@@ -2,7 +2,7 @@
 
 **Offline-first CLI for testing AI prompt behavior and detecting regressions.**
 
-Version **0.2.0**
+Version **0.3.0**
 
 Desurf lets developers define expected AI behavior as testable contracts and detect behavioral regressions when model outputs change.
 
@@ -25,7 +25,7 @@ The published package name is **`@desurfofficial-ship-it/desurf`**. The CLI bina
 ```bash
 desurf init ./my-suite
 desurf test --suite ./my-suite
-desurf --version   # 0.2.0
+desurf --version   # 0.3.0
 ```
 
 ## How offline testing works
