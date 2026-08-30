@@ -1,0 +1,75 @@
+# Desurf — reusable offline CI gate (composite Action)
+#
+# Runs deterministic offline `desurf test` and propagates exit codes:
+#   0 = PASS (job succeeds)
+#   1 = REGRESSION / FLAKY (job fails)
+#   2 = ERROR (job fails)
+#
+# Does NOT call live providers. Does NOT require OPENROUTER_API_KEY.
+
+name: Desurf Offline Gate
+description: >
+  Run offline Desurf regression tests against a committed suite.
+  Propagates Desurf exit codes 0/1/2 so GitHub Actions fails the job on
+  REGRESSION, FLAKY, or ERROR.
+
+branding:
+  icon: check-circle
+  color: green
+
+inputs:
+  suite:
+    description: >
+      Path to a Desurf suite directory (or suite.json), relative to the
+      consumer repository root ($GITHUB_WORKSPACE).
+    required: true
+  package-version:
+    description: >
+      Optional version of the published @desurfofficial-ship-it/desurf package
+      (e.g. "0.3.0"). Empty string uses the latest published version.
+    required: false
+    default: ""
+  node-version:
+    description: Node.js version for setup-node (Desurf requires >=18).
+    required: false
+    default: "22"
+
+runs:
+  using: composite
+  steps:
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ inputs.node-version }}
+
+    - name: Run Desurf offline gate
+      shell: bash
+      env:
+        DESURF_PROVIDER: offline
+      run: |
+        set -euo pipefail
+        SUITE="${{ inputs.suite }}"
+        if [ -z "$SUITE" ]; then
+          echo "Desurf Action error: input 'suite' is required" >&2
+          exit 2
+        fi
+        if [ ! -e "$SUITE" ]; then
+          echo "Desurf Action error: suite path not found: $SUITE" >&2
+          echo "(resolved under GITHUB_WORKSPACE=$(pwd))" >&2
+          exit 2
+        fi
+
+        PKG="@desurfofficial-ship-it/desurf"
+        VER="${{ inputs.package-version }}"
+        if [ -n "$VER" ]; then
+          SPEC="${PKG}@${VER}"
+        else
+          SPEC="${PKG}"
+        fi
+
+        echo "Desurf offline gate"
+        echo "  package: $SPEC"
+        echo "  suite:   $SUITE"
+        echo "  provider: offline (default)"
+        # Exit code from desurf is the quality gate (0/1/2).
+        npx --yes "$SPEC" test --suite "$SUITE"
