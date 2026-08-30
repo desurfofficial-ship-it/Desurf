@@ -179,4 +179,40 @@ describe("CLI", { timeout: 25000 }, () => {
     expect(r.code).toBe(2);
     expect(r.stderr).toMatch(/Unknown provider/i);
   });
+
+  it("test rejects out of bounds temperature with exit 2", async () => {
+    const r = await runCli([
+      "test",
+      "--suite",
+      "fixtures/basic",
+      "--temperature",
+      "3.5",
+    ]);
+    expect(r.code).toBe(2);
+    expect(r.stderr).toMatch(/--temperature must be between 0 and 2/i);
+  });
+
+  it("test rejects non-integer max-tokens with exit 2", async () => {
+    const r = await runCli([
+      "test",
+      "--suite",
+      "fixtures/basic",
+      "--max-tokens",
+      "abc",
+    ]);
+    expect(r.code).toBe(2);
+    expect(r.stderr).toMatch(/--max-tokens must be a non-negative decimal integer/i);
+  });
+
+  it("test rejects max-retries > 5 with exit 2", async () => {
+    const r = await runCli([
+      "test",
+      "--suite",
+      "fixtures/basic",
+      "--max-retries",
+      "10",
+    ]);
+    expect(r.code).toBe(2);
+    expect(r.stderr).toMatch(/--max-retries is capped at 5/i);
+  });
 });

@@ -8,7 +8,7 @@ import { GeminiAdapter } from "./gemini.js";
 import { OpenAIAdapter } from "./openai.js";
 import { OpenRouterAdapter } from "./openrouter.js";
 import { SavedOutputAdapter } from "./provider.js";
-import type { ModelAdapter } from "./types.js";
+import type { GenerationParams, ModelAdapter } from "./types.js";
 
 export type ProviderName =
   | "offline"
@@ -18,20 +18,19 @@ export type ProviderName =
   | "gemini"
   | "google";
 
-export type CreateProviderOptions = {
+export type CreateProviderOptions = GenerationParams & {
   /** Provider id from CLI. Default offline. */
   provider?: string;
-  /** Optional model id (used by live providers). */
-  model?: string;
-  /** Optional API key override (primarily for programmatic tests). */
-  apiKey?: string;
-  /** Optional custom fetch (primarily for unit tests). */
-  fetch?: typeof globalThis.fetch;
 };
 
 /**
  * Build a ModelAdapter from CLI-facing options.
  * Unknown provider names throw (configuration error → exit 2 at CLI).
+ *
+ * Generation parameters (temperature, seed, maxTokens, timeoutMs, maxRetries,
+ * systemPrompt) are passed through to live providers and ignored by the
+ * offline adapter. This keeps a single, well-typed seam between the CLI
+ * and every provider — no per-adapter flag plumbing in cli.ts.
  */
 export function createProvider(options: CreateProviderOptions = {}): ModelAdapter {
   const name = (options.provider ?? "offline").toLowerCase();
@@ -40,36 +39,23 @@ export function createProvider(options: CreateProviderOptions = {}): ModelAdapte
     return new SavedOutputAdapter();
   }
 
+  // Strip the provider id; pass the rest as shared generation params.
+  const { provider: _provider, ...gen } = options;
+
   if (name === "openrouter") {
-    return new OpenRouterAdapter({
-      model: options.model,
-      apiKey: options.apiKey,
-      fetch: options.fetch,
-    });
+    return new OpenRouterAdapter(gen);
   }
 
   if (name === "openai") {
-    return new OpenAIAdapter({
-      model: options.model,
-      apiKey: options.apiKey,
-      fetch: options.fetch,
-    });
+    return new OpenAIAdapter(gen);
   }
 
   if (name === "anthropic") {
-    return new AnthropicAdapter({
-      model: options.model,
-      apiKey: options.apiKey,
-      fetch: options.fetch,
-    });
+    return new AnthropicAdapter(gen);
   }
 
   if (name === "gemini" || name === "google") {
-    return new GeminiAdapter({
-      model: options.model,
-      apiKey: options.apiKey,
-      fetch: options.fetch,
-    });
+    return new GeminiAdapter(gen);
   }
 
   throw new Error(

@@ -204,4 +204,59 @@ describe("OpenAIAdapter", () => {
     });
     expect(adapter).toBeInstanceOf(OpenAIAdapter);
   });
+
+  it("passes systemPrompt, seed, maxTokens, and temperature", async () => {
+    const fetchMock = vi.fn(async () =>
+      jsonResponse(200, {
+        choices: [{ message: { content: "ok" } }],
+      })
+    );
+
+    const adapter = new OpenAIAdapter({
+      apiKey: "test-key",
+      fetch: fetchMock as unknown as typeof fetch,
+      temperature: 0.5,
+      seed: 42,
+      maxTokens: 100,
+      systemPrompt: "You are a helpful assistant",
+    });
+
+    await adapter.execute({
+      input: "test input",
+      prompt: "test prompt",
+    });
+
+    const body = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
+    expect(body.temperature).toBe(0.5);
+    expect(body.seed).toBe(42);
+    expect(body.max_tokens).toBe(100);
+    expect(body.messages[0]).toEqual({
+      role: "system",
+      content: "You are a helpful assistant",
+    });
+    expect(body.messages[1].role).toBe("user");
+  });
+
+  it("retries on transient 500 then succeeds", async () => {
+    let callCount = 0;
+    const fetchMock = vi.fn(async () => {
+      callCount++;
+      if (callCount === 1) {
+        return jsonResponse(500, { error: { message: "Internal server error" } });
+      }
+      return jsonResponse(200, {
+        choices: [{ message: { content: "recovered" } }],
+      });
+    });
+
+    const adapter = new OpenAIAdapter({
+      apiKey: "test-key",
+      fetch: fetchMock as unknown as typeof fetch,
+      maxRetries: 2,
+    });
+
+    const out = await adapter.execute({ input: "x", prompt: "y" });
+    expect(out.text).toBe("recovered");
+    expect(callCount).toBe(2);
+  });
 });

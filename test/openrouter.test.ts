@@ -210,6 +210,58 @@ describe("OpenRouterAdapter", () => {
     const body = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
     expect(body.model).toBe("openai/gpt-4o-mini");
   });
+
+  it("passes systemPrompt, seed, maxTokens, and temperature", async () => {
+    const fetchMock = vi.fn(async () =>
+      jsonResponse(200, {
+        choices: [{ message: { content: "ok" } }],
+      })
+    );
+
+    const adapter = new OpenRouterAdapter({
+      apiKey: "test-key",
+      fetch: fetchMock as unknown as typeof fetch,
+      temperature: 0.7,
+      seed: 123,
+      maxTokens: 250,
+      systemPrompt: "System instruction for OpenRouter",
+    });
+
+    await adapter.execute({ input: "a", prompt: "b" });
+
+    const body = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
+    expect(body.temperature).toBe(0.7);
+    expect(body.seed).toBe(123);
+    expect(body.max_tokens).toBe(250);
+    expect(body.messages[0]).toEqual({
+      role: "system",
+      content: "System instruction for OpenRouter",
+    });
+    expect(body.messages[1].role).toBe("user");
+  });
+
+  it("retries on transient 429 then succeeds", async () => {
+    let callCount = 0;
+    const fetchMock = vi.fn(async () => {
+      callCount++;
+      if (callCount === 1) {
+        return jsonResponse(429, { error: { message: "Rate limit exceeded" } });
+      }
+      return jsonResponse(200, {
+        choices: [{ message: { content: "openrouter recovered" } }],
+      });
+    });
+
+    const adapter = new OpenRouterAdapter({
+      apiKey: "test-key",
+      fetch: fetchMock as unknown as typeof fetch,
+      maxRetries: 2,
+    });
+
+    const out = await adapter.execute({ input: "x", prompt: "y" });
+    expect(out.text).toBe("openrouter recovered");
+    expect(callCount).toBe(2);
+  });
 });
 
 describe("createProvider", () => {

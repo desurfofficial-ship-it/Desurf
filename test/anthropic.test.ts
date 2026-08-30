@@ -205,4 +205,50 @@ describe("AnthropicAdapter", () => {
     });
     expect(adapter).toBeInstanceOf(AnthropicAdapter);
   });
+
+  it("passes systemPrompt, maxTokens, and temperature", async () => {
+    const fetchMock = vi.fn(async () =>
+      jsonResponse(200, {
+        content: [{ type: "text", text: "anthropic ok" }],
+      })
+    );
+
+    const adapter = new AnthropicAdapter({
+      apiKey: "test-key",
+      fetch: fetchMock as unknown as typeof fetch,
+      temperature: 0.3,
+      maxTokens: 1000,
+      systemPrompt: "You are a Claude system prompt",
+    });
+
+    await adapter.execute({ input: "a", prompt: "b" });
+
+    const body = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
+    expect(body.temperature).toBe(0.3);
+    expect(body.max_tokens).toBe(1000);
+    expect(body.system).toBe("You are a Claude system prompt");
+  });
+
+  it("retries on transient 529 (overloaded) then succeeds", async () => {
+    let callCount = 0;
+    const fetchMock = vi.fn(async () => {
+      callCount++;
+      if (callCount === 1) {
+        return jsonResponse(529, { error: { message: "Overloaded" } });
+      }
+      return jsonResponse(200, {
+        content: [{ type: "text", text: "anthropic recovered" }],
+      });
+    });
+
+    const adapter = new AnthropicAdapter({
+      apiKey: "test-key",
+      fetch: fetchMock as unknown as typeof fetch,
+      maxRetries: 2,
+    });
+
+    const out = await adapter.execute({ input: "x", prompt: "y" });
+    expect(out.text).toBe("anthropic recovered");
+    expect(callCount).toBe(2);
+  });
 });

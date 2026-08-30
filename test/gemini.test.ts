@@ -228,4 +228,52 @@ describe("GeminiAdapter", () => {
     });
     expect(adapter2).toBeInstanceOf(GeminiAdapter);
   });
+
+  it("passes systemPrompt, maxTokens, and temperature into Gemini request", async () => {
+    const fetchMock = vi.fn(async () =>
+      jsonResponse(200, {
+        candidates: [{ content: { parts: [{ text: "ok" }] } }],
+      })
+    );
+
+    const adapter = new GeminiAdapter({
+      apiKey: "test-key",
+      fetch: fetchMock as unknown as typeof fetch,
+      temperature: 0.2,
+      maxTokens: 500,
+      systemPrompt: "System instruction test",
+    });
+
+    await adapter.execute({ input: "a", prompt: "b" });
+
+    const body = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
+    expect(body.generationConfig.temperature).toBe(0.2);
+    expect(body.generationConfig.maxOutputTokens).toBe(500);
+    expect(body.systemInstruction).toEqual({
+      parts: [{ text: "System instruction test" }],
+    });
+  });
+
+  it("retries on transient 503 then succeeds", async () => {
+    let callCount = 0;
+    const fetchMock = vi.fn(async () => {
+      callCount++;
+      if (callCount === 1) {
+        return jsonResponse(503, { error: { message: "Service unavailable" } });
+      }
+      return jsonResponse(200, {
+        candidates: [{ content: { parts: [{ text: "gemini recovered" }] } }],
+      });
+    });
+
+    const adapter = new GeminiAdapter({
+      apiKey: "test-key",
+      fetch: fetchMock as unknown as typeof fetch,
+      maxRetries: 2,
+    });
+
+    const out = await adapter.execute({ input: "x", prompt: "y" });
+    expect(out.text).toBe("gemini recovered");
+    expect(callCount).toBe(2);
+  });
 });

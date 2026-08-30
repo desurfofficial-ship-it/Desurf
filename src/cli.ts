@@ -78,6 +78,12 @@ Options:
   --repeat <n>         Execute each case N times (default 1; max 1000, or 100 with live providers)
   --provider <name>    offline (default) | openrouter | openai | anthropic | gemini
   --model <id>         Model id for live providers (uses provider default if omitted)
+  --temperature <n>    Sampling temperature 0–2 (default 0 = deterministic; see note below)
+  --seed <n>           Best-effort determinism seed (OpenAI-compatible endpoints)
+  --max-tokens <n>     Cap output length (omitted = provider default)
+  --timeout-ms <n>     Per-request deadline in ms (default 30000; min 1000; max 600000)
+  --max-retries <n>    Retries on transient 429/5xx/network errors (default 0; max 5)
+  --system-prompt <s>  System message prepended to every user message
   --verbose            Extra diagnostic output (no secrets)
   --json               Machine-readable JSON on stdout (diagnostics on stderr)
   --help, -h           Show this help
@@ -87,6 +93,17 @@ Environment (live providers only):
   OPENAI_API_KEY       API key for openai (never printed)
   ANTHROPIC_API_KEY    API key for anthropic (never printed)
   GEMINI_API_KEY       API key for gemini (or GOOGLE_API_KEY) (never printed)
+
+Determinism (why --temperature defaults to 0):
+  A recorded cassette is meant to be a reproducible baseline. The provider
+  default temperature is 1.0 (stochastic), so "desurf record --force" against
+  an identical prompt could legitimately produce a different output — and the
+  very next "desurf test" would report a "regression" that is really sampling
+  noise. Desurf pins temperature to 0 by default so the offline-cassette
+  guarantee actually holds. Pass --temperature 1 to opt into stochastic runs.
+
+  DESURF_TIMEOUT_MS    Fallback per-request deadline if --timeout-ms omitted
+  DESURF_MAX_RETRIES   Fallback retry count if --max-retries omitted
 
 Regex safety:
   DESURF_REGEX_TIMEOUT_MS   Hard deadline per regex assertion in ms (default 5000).
@@ -134,6 +151,12 @@ Options:
   --suite <path>       Path to suite directory (or suite.json) (required)
   --provider <name>    Live provider: openrouter | openai | anthropic | gemini (required)
   --model <id>         Model id (uses provider default if omitted)
+  --temperature <n>    Sampling temperature 0–2 (default 0 = deterministic; see desurf test --help)
+  --seed <n>           Best-effort determinism seed (OpenAI-compatible endpoints)
+  --max-tokens <n>     Cap output length (omitted = provider default; Anthropic requires it and defaults to 4096)
+  --timeout-ms <n>     Per-request deadline in ms (default 30000; min 1000; max 600000)
+  --max-retries <n>    Retries on transient 429/5xx/network errors (default 0; max 5)
+  --system-prompt <s>  System message prepended to every user message
   --case <id>          Record only the named test case
   --force              Overwrite existing non-empty output files
   --help, -h           Show this help
@@ -144,10 +167,15 @@ Environment:
   ANTHROPIC_API_KEY    Required for anthropic (never printed)
   GEMINI_API_KEY       Required for gemini (or GOOGLE_API_KEY) (never printed)
 
+  DESURF_TIMEOUT_MS    Fallback per-request deadline if --timeout-ms omitted
+  DESURF_MAX_RETRIES   Fallback retry count if --max-retries omitted
+
 Notes:
   - Does not evaluate assertions; only captures provider output.
   - Existing non-empty outputs are skipped unless --force is set.
   - Partial success is preserved if a later case fails.
+  - --temperature defaults to 0 so a re-record against the same prompt/input
+    reproduces the same output (otherwise the next test flags spurious drift).
 
 Exit codes:
   0  all selected cases recorded or intentionally skipped
@@ -226,8 +254,46 @@ type ParsedArgs = {
   force?: boolean;
   verbose?: boolean;
   json?: boolean;
+  // Live-provider generation knobs (ignored by offline adapter).
+  temperature?: number;
+  seed?: number;
+  maxTokens?: number;
+  timeoutMs?: number;
+  maxRetries?: number;
+  systemPrompt?: string;
   positional: string[];
 };
+
+/**
+ * Parse a numeric CLI flag value with strict decimal syntax.
+ * Used by --repeat, --temperature, --seed, --max-tokens, --timeout-ms,
+ * --max-retries. Rejects hex (0x10), scientific (1e9), and whitespace so
+ * the same coercion bug class that bit --repeat cannot recur here.
+ *
+ * `kind` is included in the error so the message names the offending flag.
+ * `opts.integer` selects integer vs. floating-point parsing.
+ */
+function parseNumericFlag(
+  raw: string,
+  kind: string,
+  opts: { integer: boolean }
+): number {
+  if (opts.integer) {
+    if (!/^\d+$/.test(raw)) {
+      throw new Error(
+        `--${kind} must be a non-negative decimal integer (digits 0-9 only), got: ${raw}`
+      );
+    }
+  } else {
+    // Allow an optional leading sign and a decimal point. Reject hex / sci.
+    if (!/^-?\d+(\.\d+)?$/.test(raw)) {
+      throw new Error(
+        `--${kind} must be a decimal number, got: ${raw}`
+      );
+    }
+  }
+  return Number(raw);
+}
 
 function parseArgs(argv: string[]): ParsedArgs {
   const args = argv.slice(2);
@@ -308,6 +374,74 @@ function parseArgs(argv: string[]): ParsedArgs {
         throw new Error("Option --model requires a value");
       }
       result.model = args[++i];
+      i++;
+    } else if (a === "--temperature") {
+      if (i + 1 >= args.length || args[i + 1].startsWith("-")) {
+        throw new Error("Option --temperature requires a value");
+      }
+      const raw = args[++i];
+      const n = parseNumericFlag(raw, "temperature", { integer: false });
+      if (n < 0 || n > 2) {
+        throw new Error(
+          `--temperature must be between 0 and 2 (got ${n}). 0 = deterministic; the provider default for most models is 1.0 (stochastic).`
+        );
+      }
+      result.temperature = n;
+      i++;
+    } else if (a === "--seed") {
+      if (i + 1 >= args.length || args[i + 1].startsWith("-")) {
+        throw new Error("Option --seed requires a value");
+      }
+      const raw = args[++i];
+      const n = parseNumericFlag(raw, "seed", { integer: true });
+      result.seed = n;
+      i++;
+    } else if (a === "--max-tokens") {
+      if (i + 1 >= args.length || args[i + 1].startsWith("-")) {
+        throw new Error("Option --max-tokens requires a value");
+      }
+      const raw = args[++i];
+      const n = parseNumericFlag(raw, "max-tokens", { integer: true });
+      if (n < 1) {
+        throw new Error(`--max-tokens must be a positive integer (got ${n})`);
+      }
+      result.maxTokens = n;
+      i++;
+    } else if (a === "--timeout-ms") {
+      if (i + 1 >= args.length || args[i + 1].startsWith("-")) {
+        throw new Error("Option --timeout-ms requires a value");
+      }
+      const raw = args[++i];
+      const n = parseNumericFlag(raw, "timeout-ms", { integer: true });
+      if (n < 1000) {
+        throw new Error(
+          `--timeout-ms must be at least 1000 (got ${n}); use a larger value for slow models.`
+        );
+      }
+      result.timeoutMs = n;
+      i++;
+    } else if (a === "--max-retries") {
+      if (i + 1 >= args.length || args[i + 1].startsWith("-")) {
+        throw new Error("Option --max-retries requires a value");
+      }
+      const raw = args[++i];
+      const n = parseNumericFlag(raw, "max-retries", { integer: true });
+      if (n > 5) {
+        throw new Error(
+          `--max-retries is capped at 5 (got ${n}); each retry is a billed network call.`
+        );
+      }
+      result.maxRetries = n;
+      i++;
+    } else if (a === "--system-prompt") {
+      if (i + 1 >= args.length || args[i + 1].startsWith("-")) {
+        throw new Error("Option --system-prompt requires a value");
+      }
+      const val = args[++i];
+      if (val === "") {
+        throw new Error("Option --system-prompt requires a non-empty value");
+      }
+      result.systemPrompt = val;
       i++;
     } else if (a === "--force") {
       result.force = true;
@@ -436,6 +570,12 @@ async function cmdTest(parsed: ParsedArgs): Promise<number> {
     provider = createProvider({
       provider: parsed.provider,
       model: parsed.model,
+      temperature: parsed.temperature,
+      seed: parsed.seed,
+      maxTokens: parsed.maxTokens,
+      timeoutMs: parsed.timeoutMs,
+      maxRetries: parsed.maxRetries,
+      systemPrompt: parsed.systemPrompt,
     });
   } catch (err) {
     console.error(err instanceof Error ? err.message : String(err));
@@ -560,6 +700,12 @@ async function cmdRecord(parsed: ParsedArgs): Promise<number> {
     provider = createProvider({
       provider: parsed.provider,
       model: parsed.model,
+      temperature: parsed.temperature,
+      seed: parsed.seed,
+      maxTokens: parsed.maxTokens,
+      timeoutMs: parsed.timeoutMs,
+      maxRetries: parsed.maxRetries,
+      systemPrompt: parsed.systemPrompt,
     });
   } catch (err) {
     console.error(err instanceof Error ? err.message : String(err));

@@ -4,22 +4,22 @@
  * Does not log or expose API credentials.
  */
 
-import type { ExecuteRequest, ModelAdapter, ModelOutput } from "./types.js";
+import type { ExecuteRequest, GenerationParams, ModelAdapter, ModelOutput } from "./types.js";
+import {
+  fetchWithRetries,
+  normalizeMaxTokens,
+  normalizeSeed,
+  normalizeTemperature,
+  resolveMaxRetries,
+  resolveTimeoutMs,
+} from "./provider-utils.js";
 
 const DEFAULT_MODEL = "openai/gpt-4o-mini";
 const DEFAULT_BASE_URL = "https://openrouter.ai/api/v1";
-/** Request timeout for live OpenRouter calls (ms). */
-const DEFAULT_TIMEOUT_MS = 30_000;
 
-export type OpenRouterAdapterOptions = {
-  /** Defaults to process.env.OPENROUTER_API_KEY */
-  apiKey?: string;
-  /** Defaults to openai/gpt-4o-mini */
-  model?: string;
-  /** Defaults to https://openrouter.ai/api/v1 */
+export type OpenRouterAdapterOptions = GenerationParams & {
+  /** @deprecated use {@link GenerationParams.timeoutMs} — kept for source compat */
   baseUrl?: string;
-  /** Injected for tests; defaults to global fetch */
-  fetch?: typeof globalThis.fetch;
 };
 
 type ChatCompletionsBody = {
@@ -48,6 +48,12 @@ export class OpenRouterAdapter implements ModelAdapter {
   private readonly model: string;
   private readonly baseUrl: string;
   private readonly fetchFn: typeof globalThis.fetch;
+  private readonly timeoutMs: number;
+  private readonly maxRetries: number;
+  private readonly temperature: number | undefined;
+  private readonly seed: number | undefined;
+  private readonly maxTokens: number | undefined;
+  private readonly systemPrompt: string | undefined;
 
   constructor(options: OpenRouterAdapterOptions = {}) {
     const key = options.apiKey ?? process.env.OPENROUTER_API_KEY ?? "";
@@ -59,6 +65,14 @@ export class OpenRouterAdapter implements ModelAdapter {
       DEFAULT_BASE_URL
     ).replace(/\/$/, "");
     this.fetchFn = options.fetch ?? globalThis.fetch.bind(globalThis);
+    this.timeoutMs = resolveTimeoutMs(options.timeoutMs);
+    this.maxRetries = resolveMaxRetries(options.maxRetries);
+    // normalizeTemperature defaults to 0 (deterministic) when omitted, so
+    // recorded cassettes are reproducible. Throws on out-of-range input.
+    this.temperature = normalizeTemperature(options.temperature);
+    this.seed = normalizeSeed(options.seed);
+    this.maxTokens = normalizeMaxTokens(options.maxTokens);
+    this.systemPrompt = options.systemPrompt?.trim() || undefined;
   }
 
   async execute(request: ExecuteRequest): Promise<ModelOutput> {
@@ -80,36 +94,59 @@ export class OpenRouterAdapter implements ModelAdapter {
       .filter(Boolean)
       .join("\n\n");
 
+    // Request-level overrides win over constructor-level.
+    const temperature =
+      request.temperature !== undefined
+        ? normalizeTemperature(request.temperature)
+        : this.temperature;
+    const seed =
+      request.seed !== undefined ? normalizeSeed(request.seed) : this.seed;
+    const maxTokens =
+      request.maxTokens !== undefined
+        ? normalizeMaxTokens(request.maxTokens)
+        : this.maxTokens;
+    const systemPrompt =
+      request.systemPrompt?.trim() || this.systemPrompt;
+
+    // Build the messages array. system role first (if provided), then user.
+    const messages: Array<{ role: string; content: string }> = [];
+    if (systemPrompt) {
+      messages.push({ role: "system", content: systemPrompt });
+    }
+    messages.push({ role: "user", content: userContent });
+
+    const reqBody: Record<string, unknown> = {
+      model: selectedModel,
+      messages,
+      // Default temperature 0 = deterministic sampling. This is the single
+      // most important determinism knob: without it, `desurf record --force`
+      // against the same prompt could produce a different output and the
+      // next `desurf test` would flag a spurious regression.
+      temperature,
+    };
+    if (seed !== undefined) {
+      reqBody.seed = seed;
+    }
+    if (maxTokens !== undefined) {
+      reqBody.max_tokens = maxTokens;
+    }
+
     const url = `${this.baseUrl}/chat/completions`;
-    let response: HttpResponse;
-    try {
-      response = (await this.fetchFn(url, {
+    const response: HttpResponse = (await fetchWithRetries(
+      this.fetchFn,
+      url,
+      {
         method: "POST",
         headers: {
           Authorization: `Bearer ${this.apiKey}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          model: selectedModel,
-          messages: [{ role: "user", content: userContent }],
-        }),
-        signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS),
-      })) as HttpResponse;
-    } catch (err) {
-      const name = err instanceof Error ? err.name : "";
-      const raw = err instanceof Error ? err.message : String(err);
-      const msg = redactSecrets(raw, this.apiKey);
-      if (
-        name === "TimeoutError" ||
-        name === "AbortError" ||
-        /aborted|timeout/i.test(msg)
-      ) {
-        throw new Error(
-          `OpenRouterAdapter: request timed out after ${DEFAULT_TIMEOUT_MS}ms`
-        );
-      }
-      throw new Error(`OpenRouterAdapter: network error: ${msg}`);
-    }
+        body: JSON.stringify(reqBody),
+      },
+      this.timeoutMs,
+      this.maxRetries,
+      (s) => redactSecrets(s, this.apiKey)
+    )) as unknown as HttpResponse;
 
     const rawText = await response.text();
     if (!response.ok) {

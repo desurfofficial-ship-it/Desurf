@@ -65,4 +65,17 @@ describe("provider selection + offline default", () => {
       /Unknown provider: "unknown-ai"\. Supported: offline, openrouter, openai, anthropic, gemini/
     );
   });
+
+  it("passes GenerationParams to created live adapter", () => {
+    const adapter = createProvider({
+      provider: "openai",
+      temperature: 0.5,
+      seed: 42,
+      maxTokens: 100,
+      timeoutMs: 5000,
+      maxRetries: 3,
+      systemPrompt: "test system",
+    });
+    expect(adapter).toBeInstanceOf(OpenAIAdapter);
+  });
 });

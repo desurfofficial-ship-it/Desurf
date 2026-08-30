@@ -88,6 +88,46 @@ export type ExecuteRequest = {
   outputPath?: string;
   /** Optional model id override */
   model?: string;
+  /**
+   * Optional system prompt prepended to the user message. Most production
+   * prompts are system-shaped ("You are a JSON-only classifier..."); without
+   * this, authors had to stuff the system instructions into the user prompt,
+   * which some models treat differently and which the recorder then
+   * fingerprints as part of the "prompt" file — conflating role and content.
+   * Read from the case's prompt file by default; can be overridden by the
+   * adapter.
+   */
+  systemPrompt?: string;
+  /** Sampling temperature override (provider default is 0 for determinism). */
+  temperature?: number;
+  /** Best-effort determinism seed (OpenAI-compatible endpoints). */
+  seed?: number;
+  /** Max output tokens (omitted = provider default). */
+  maxTokens?: number;
+};
+
+/** Generation parameters shared across live providers. */
+export type GenerationParams = {
+  /** Model id. Uses provider default if omitted. */
+  model?: string;
+  /** API key override (primarily for tests). */
+  apiKey?: string;
+  /** Custom fetch (primarily for tests). */
+  fetch?: typeof globalThis.fetch;
+  /** Custom base URL (primarily for tests / proxies). */
+  baseUrl?: string;
+  /** Per-request timeout in ms. */
+  timeoutMs?: number;
+  /** Max retries on transient (408/429/5xx/network) errors. 0 = single attempt. */
+  maxRetries?: number;
+  /** Sampling temperature. Provider default is 0 (deterministic). */
+  temperature?: number;
+  /** Best-effort determinism seed. */
+  seed?: number;
+  /** Max output tokens. */
+  maxTokens?: number;
+  /** System prompt prepended to every user message. */
+  systemPrompt?: string;
 };
 
 /** Provider interface — engine depends only on this. */

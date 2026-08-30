@@ -18,17 +18,9 @@ type RawAssertion = {
   [key: string]: unknown;
 };
 
-type RawCase = {
-  id: string;
-  input: string;
-  prompt: string;
-  output: string;
-  assertions: RawAssertion[];
-};
-
 type RawSuite = {
-  name: string;
-  cases: RawCase[];
+  name?: unknown;
+  cases?: unknown;
 };
 
 const ALLOWED_FIELDS: Record<string, Set<string>> = {
@@ -210,12 +202,21 @@ export function parseAssertion(raw: RawAssertion): Assertion {
  * own author can still point elsewhere. That is an explicit on-disk
  * action by someone who already controls the checkout — out of scope
  * here, same boundary most build-tool sandboxes draw.
+ *
+ * Self-clobber guard: a case `"output": "suite.json"` (or any path that
+ * resolves to the suite file) is rejected. A successful `desurf record`
+ * against such a case would `writeFile(suite.json, modelOutput)`,
+ * destroying the suite definition the very next load. The input/prompt
+ * fields are likewise refused from naming suite.json — reading the suite
+ * file as "input" leaks the suite structure into the model output and
+ * is never the author's intent.
  */
 function resolveCasePath(
   rootDir: string,
   p: string,
   field: string,
-  caseId: string
+  caseId: string,
+  suiteFile: string
 ): string {
   if (isAbsolute(p)) {
     throw new Error(
@@ -229,6 +230,12 @@ function resolveCasePath(
     throw new Error(
       `Case "${caseId}" field "${field}" escapes the suite directory: ${p} (resolves to ${resolved}). ` +
         `Case files must live under the suite root.`
+    );
+  }
+  if (resolved === suiteFile) {
+    throw new Error(
+      `Case "${caseId}" field "${field}" must not name the suite file itself: ${p} (resolves to ${suiteFile}). ` +
+        `Recording would overwrite suite.json with model output and destroy the suite.`
     );
   }
   return resolved;
@@ -271,14 +278,26 @@ export async function loadSuite(suitePath: string): Promise<Suite> {
   }
 
   const rawText = (await readFile(suiteFile, "utf8")).replace(/^\uFEFF/, "");
-  let raw: RawSuite;
+  let raw: unknown;
   try {
-    raw = JSON.parse(rawText) as RawSuite;
+    raw = JSON.parse(rawText);
   } catch {
     throw new Error(`Invalid JSON in suite file: ${suiteFile}`);
   }
 
-  if (typeof raw.name !== "string" || raw.name.length === 0 || !Array.isArray(raw.cases)) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    throw new Error(
+      `Suite file must contain a JSON object: ${suiteFile}`
+    );
+  }
+
+  const rawObj = raw as RawSuite;
+
+  if (
+    typeof rawObj.name !== "string" ||
+    rawObj.name.length === 0 ||
+    !Array.isArray(rawObj.cases)
+  ) {
     throw new Error(
       `Suite must have a non-empty string "name" and "cases" array: ${suiteFile}`
     );
@@ -286,7 +305,7 @@ export async function loadSuite(suitePath: string): Promise<Suite> {
 
   // An empty suite evaluates to PASS by definition — a green gate over zero
   // contracts. For a regression gate this must be a configuration error.
-  if (raw.cases.length === 0) {
+  if (rawObj.cases.length === 0) {
     throw new Error(
       `Suite has no test cases (${suiteFile}). An empty suite gates nothing — add a case or delete the suite.`
     );
@@ -294,10 +313,46 @@ export async function loadSuite(suitePath: string): Promise<Suite> {
 
   const seenIds = new Set<string>();
 
-  const cases: TestCase[] = raw.cases.map((c) => {
-    if (!c.id || !c.input || !c.prompt || !c.output || !Array.isArray(c.assertions)) {
+  const cases: TestCase[] = rawObj.cases.map((c: any) => {
+    if (!c || typeof c !== "object" || Array.isArray(c)) {
       throw new Error(
-        `Each case needs id, input, prompt, output, assertions (case: ${c.id ?? "?"})`
+        `Each case must be a JSON object (in ${suiteFile})`
+      );
+    }
+    // `c.id` must be a non-empty string. JSON lets you write `"id": 123`
+    // (number) or `"id": true` (boolean); a non-string id silently loads
+    // (the case "runs" as case id `123`) but can never be selected via
+    // `--case <id>`, since the CLI always passes a string and
+    // `c.id === options.caseId` compares number-vs-string. Reject loudly
+    // at load time so authors discover the typo before CI does.
+    if (typeof c.id !== "string" || c.id.length === 0) {
+      throw new Error(
+        `Each case needs a non-empty string "id" (got ${JSON.stringify(c.id)}). ` +
+          `Numeric or boolean ids cannot be selected with --case and break report correlation.`
+      );
+    }
+    // input / prompt / output must be non-empty strings. A number or
+    // boolean would slip through the old truthy check (`!c.input` is false
+    // for `123`), then crash resolveCasePath with a non-string argument
+    // later. Validate at the boundary.
+    if (typeof c.input !== "string" || c.input.length === 0) {
+      throw new Error(
+        `Case "${c.id}" field "input" must be a non-empty string (got ${JSON.stringify(c.input)})`
+      );
+    }
+    if (typeof c.prompt !== "string" || c.prompt.length === 0) {
+      throw new Error(
+        `Case "${c.id}" field "prompt" must be a non-empty string (got ${JSON.stringify(c.prompt)})`
+      );
+    }
+    if (typeof c.output !== "string" || c.output.length === 0) {
+      throw new Error(
+        `Case "${c.id}" field "output" must be a non-empty string (got ${JSON.stringify(c.output)})`
+      );
+    }
+    if (!Array.isArray(c.assertions)) {
+      throw new Error(
+        `Case "${c.id}" field "assertions" must be an array (got ${typeof c.assertions})`
       );
     }
     if (seenIds.has(c.id)) {
@@ -314,15 +369,15 @@ export async function loadSuite(suitePath: string): Promise<Suite> {
 
     return {
       id: c.id,
-      input: resolveCasePath(rootDir, c.input, "input", c.id),
-      prompt: resolveCasePath(rootDir, c.prompt, "prompt", c.id),
-      outputPath: resolveCasePath(rootDir, c.output, "output", c.id),
-      assertions: c.assertions.map(parseAssertion),
+      input: resolveCasePath(rootDir, c.input, "input", c.id, suiteFile),
+      prompt: resolveCasePath(rootDir, c.prompt, "prompt", c.id, suiteFile),
+      outputPath: resolveCasePath(rootDir, c.output, "output", c.id, suiteFile),
+      assertions: c.assertions.map((a: unknown) => parseAssertion(a as RawAssertion)),
     };
   });
 
   return {
-    name: raw.name,
+    name: rawObj.name,
     rootDir,
     cases,
   };

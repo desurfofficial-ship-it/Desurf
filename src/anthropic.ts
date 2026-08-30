@@ -4,22 +4,23 @@
  * Does not log or expose API credentials.
  */
 
-import type { ExecuteRequest, ModelAdapter, ModelOutput } from "./types.js";
+import type { ExecuteRequest, GenerationParams, ModelAdapter, ModelOutput } from "./types.js";
+import {
+  fetchWithRetries,
+  normalizeMaxTokens,
+  normalizeTemperature,
+  resolveMaxRetries,
+  resolveTimeoutMs,
+  DEFAULT_MAX_TOKENS,
+} from "./provider-utils.js";
 
 const DEFAULT_MODEL = "claude-3-5-haiku-20241022";
 const DEFAULT_BASE_URL = "https://api.anthropic.com/v1";
-const DEFAULT_TIMEOUT_MS = 30_000;
 const ANTHROPIC_VERSION = "2023-06-01";
 
-export type AnthropicAdapterOptions = {
-  /** Defaults to process.env.ANTHROPIC_API_KEY */
-  apiKey?: string;
-  /** Defaults to claude-3-5-haiku-20241022 */
-  model?: string;
-  /** Defaults to https://api.anthropic.com/v1 */
+export type AnthropicAdapterOptions = GenerationParams & {
+  /** @deprecated use {@link GenerationParams.timeoutMs} — kept for source compat */
   baseUrl?: string;
-  /** Injected for tests; defaults to global fetch */
-  fetch?: typeof globalThis.fetch;
 };
 
 type MessagesResponseBody = {
@@ -47,6 +48,11 @@ export class AnthropicAdapter implements ModelAdapter {
   private readonly model: string;
   private readonly baseUrl: string;
   private readonly fetchFn: typeof globalThis.fetch;
+  private readonly timeoutMs: number;
+  private readonly maxRetries: number;
+  private readonly temperature: number | undefined;
+  private readonly maxTokens: number;
+  private readonly systemPrompt: string | undefined;
 
   constructor(options: AnthropicAdapterOptions = {}) {
     const key = options.apiKey ?? process.env.ANTHROPIC_API_KEY ?? "";
@@ -58,6 +64,12 @@ export class AnthropicAdapter implements ModelAdapter {
       DEFAULT_BASE_URL
     ).replace(/\/$/, "");
     this.fetchFn = options.fetch ?? globalThis.fetch.bind(globalThis);
+    this.timeoutMs = resolveTimeoutMs(options.timeoutMs);
+    this.maxRetries = resolveMaxRetries(options.maxRetries);
+    this.temperature = normalizeTemperature(options.temperature);
+    // Anthropic REQUIRES max_tokens — default it rather than omit.
+    this.maxTokens = normalizeMaxTokens(options.maxTokens) ?? DEFAULT_MAX_TOKENS;
+    this.systemPrompt = options.systemPrompt?.trim() || undefined;
   }
 
   async execute(request: ExecuteRequest): Promise<ModelOutput> {
@@ -78,38 +90,46 @@ export class AnthropicAdapter implements ModelAdapter {
       .filter(Boolean)
       .join("\n\n");
 
+    const temperature =
+      request.temperature !== undefined
+        ? normalizeTemperature(request.temperature)
+        : this.temperature;
+    const maxTokens =
+      request.maxTokens !== undefined
+        ? normalizeMaxTokens(request.maxTokens) ?? this.maxTokens
+        : this.maxTokens;
+    const systemPrompt =
+      request.systemPrompt?.trim() || this.systemPrompt;
+
+    // Anthropic's API takes `system` as a top-level field, not a message role.
+    const reqBody: Record<string, unknown> = {
+      model: selectedModel,
+      max_tokens: maxTokens,
+      // Default temperature 0 = deterministic.
+      temperature,
+      messages: [{ role: "user", content: userContent }],
+    };
+    if (systemPrompt) {
+      reqBody.system = systemPrompt;
+    }
+
     const url = `${this.baseUrl}/messages`;
-    let response: HttpResponse;
-    try {
-      response = (await this.fetchFn(url, {
+    const response: HttpResponse = (await fetchWithRetries(
+      this.fetchFn,
+      url,
+      {
         method: "POST",
         headers: {
           "x-api-key": this.apiKey,
           "anthropic-version": ANTHROPIC_VERSION,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          model: selectedModel,
-          max_tokens: 4096,
-          messages: [{ role: "user", content: userContent }],
-        }),
-        signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS),
-      })) as HttpResponse;
-    } catch (err) {
-      const name = err instanceof Error ? err.name : "";
-      const raw = err instanceof Error ? err.message : String(err);
-      const msg = redactSecrets(raw, this.apiKey);
-      if (
-        name === "TimeoutError" ||
-        name === "AbortError" ||
-        /aborted|timeout/i.test(msg)
-      ) {
-        throw new Error(
-          `AnthropicAdapter: request timed out after ${DEFAULT_TIMEOUT_MS}ms`
-        );
-      }
-      throw new Error(`AnthropicAdapter: network error: ${msg}`);
-    }
+        body: JSON.stringify(reqBody),
+      },
+      this.timeoutMs,
+      this.maxRetries,
+      (s) => redactSecrets(s, this.apiKey)
+    )) as unknown as HttpResponse;
 
     const rawText = await response.text();
     if (!response.ok) {
@@ -125,15 +145,15 @@ export class AnthropicAdapter implements ModelAdapter {
       );
     }
 
-    let body: MessagesResponseBody;
+    let resBody: MessagesResponseBody;
     try {
-      body = JSON.parse(rawText) as MessagesResponseBody;
+      resBody = JSON.parse(rawText) as MessagesResponseBody;
     } catch {
       throw new Error("AnthropicAdapter: response was not valid JSON");
     }
 
-    const textBlocks =
-      body.content
+    const textBlocks: string[] =
+      resBody.content
         ?.filter(
           (block) => block.type === "text" && typeof block.text === "string"
         )

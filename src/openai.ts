@@ -4,21 +4,22 @@
  * Does not log or expose API credentials.
  */
 
-import type { ExecuteRequest, ModelAdapter, ModelOutput } from "./types.js";
+import type { ExecuteRequest, GenerationParams, ModelAdapter, ModelOutput } from "./types.js";
+import {
+  fetchWithRetries,
+  normalizeMaxTokens,
+  normalizeSeed,
+  normalizeTemperature,
+  resolveMaxRetries,
+  resolveTimeoutMs,
+} from "./provider-utils.js";
 
 const DEFAULT_MODEL = "gpt-4o-mini";
 const DEFAULT_BASE_URL = "https://api.openai.com/v1";
-const DEFAULT_TIMEOUT_MS = 30_000;
 
-export type OpenAIAdapterOptions = {
-  /** Defaults to process.env.OPENAI_API_KEY */
-  apiKey?: string;
-  /** Defaults to gpt-4o-mini */
-  model?: string;
-  /** Defaults to https://api.openai.com/v1 */
+export type OpenAIAdapterOptions = GenerationParams & {
+  /** @deprecated use {@link GenerationParams.timeoutMs} — kept for source compat */
   baseUrl?: string;
-  /** Injected for tests; defaults to global fetch */
-  fetch?: typeof globalThis.fetch;
 };
 
 type ChatCompletionsBody = {
@@ -45,6 +46,12 @@ export class OpenAIAdapter implements ModelAdapter {
   private readonly model: string;
   private readonly baseUrl: string;
   private readonly fetchFn: typeof globalThis.fetch;
+  private readonly timeoutMs: number;
+  private readonly maxRetries: number;
+  private readonly temperature: number | undefined;
+  private readonly seed: number | undefined;
+  private readonly maxTokens: number | undefined;
+  private readonly systemPrompt: string | undefined;
 
   constructor(options: OpenAIAdapterOptions = {}) {
     const key = options.apiKey ?? process.env.OPENAI_API_KEY ?? "";
@@ -56,6 +63,12 @@ export class OpenAIAdapter implements ModelAdapter {
       DEFAULT_BASE_URL
     ).replace(/\/$/, "");
     this.fetchFn = options.fetch ?? globalThis.fetch.bind(globalThis);
+    this.timeoutMs = resolveTimeoutMs(options.timeoutMs);
+    this.maxRetries = resolveMaxRetries(options.maxRetries);
+    this.temperature = normalizeTemperature(options.temperature);
+    this.seed = normalizeSeed(options.seed);
+    this.maxTokens = normalizeMaxTokens(options.maxTokens);
+    this.systemPrompt = options.systemPrompt?.trim() || undefined;
   }
 
   async execute(request: ExecuteRequest): Promise<ModelOutput> {
@@ -74,36 +87,53 @@ export class OpenAIAdapter implements ModelAdapter {
       .filter(Boolean)
       .join("\n\n");
 
+    const temperature =
+      request.temperature !== undefined
+        ? normalizeTemperature(request.temperature)
+        : this.temperature;
+    const seed =
+      request.seed !== undefined ? normalizeSeed(request.seed) : this.seed;
+    const maxTokens =
+      request.maxTokens !== undefined
+        ? normalizeMaxTokens(request.maxTokens)
+        : this.maxTokens;
+    const systemPrompt =
+      request.systemPrompt?.trim() || this.systemPrompt;
+
+    const messages: Array<{ role: string; content: string }> = [];
+    if (systemPrompt) {
+      messages.push({ role: "system", content: systemPrompt });
+    }
+    messages.push({ role: "user", content: userContent });
+
+    const reqBody: Record<string, unknown> = {
+      model: selectedModel,
+      messages,
+      temperature,
+    };
+    if (seed !== undefined) {
+      reqBody.seed = seed;
+    }
+    if (maxTokens !== undefined) {
+      reqBody.max_tokens = maxTokens;
+    }
+
     const url = `${this.baseUrl}/chat/completions`;
-    let response: HttpResponse;
-    try {
-      response = (await this.fetchFn(url, {
+    const response: HttpResponse = (await fetchWithRetries(
+      this.fetchFn,
+      url,
+      {
         method: "POST",
         headers: {
           Authorization: `Bearer ${this.apiKey}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          model: selectedModel,
-          messages: [{ role: "user", content: userContent }],
-        }),
-        signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS),
-      })) as HttpResponse;
-    } catch (err) {
-      const name = err instanceof Error ? err.name : "";
-      const raw = err instanceof Error ? err.message : String(err);
-      const msg = redactSecrets(raw, this.apiKey);
-      if (
-        name === "TimeoutError" ||
-        name === "AbortError" ||
-        /aborted|timeout/i.test(msg)
-      ) {
-        throw new Error(
-          `OpenAIAdapter: request timed out after ${DEFAULT_TIMEOUT_MS}ms`
-        );
-      }
-      throw new Error(`OpenAIAdapter: network error: ${msg}`);
-    }
+        body: JSON.stringify(reqBody),
+      },
+      this.timeoutMs,
+      this.maxRetries,
+      (s) => redactSecrets(s, this.apiKey)
+    )) as unknown as HttpResponse;
 
     const rawText = await response.text();
     if (!response.ok) {
