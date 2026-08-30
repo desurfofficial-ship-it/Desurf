@@ -143,7 +143,7 @@ describe("unsealed cassette visibility", () => {
       provider: new SavedOutputAdapter(),
     });
     expect(summary.passed).toBe(1);
-    expect(summary.cases[0].cassetteState).toBe("sealed");
+    expect(summary.cases[0].cassetteState).toBe("recorded");
 
     const cli = await runCli(["test", "--suite", suiteDir]);
     expect(cli.code).toBe(0);
