@@ -59,10 +59,10 @@ export type ReliabilityState = "PASS" | "FLAKY" | "REGRESSION" | "ERROR";
 /**
  * Offline cassette provenance state for one case's saved output.
  * - unsealed: no `.desurf` sidecar (legacy / unprotected)
- * - sealed: `.desurf` present from `desurf seal` or `desurf record`
- *   (identical sidecar shape; both provide provenance protection)
+ * - sealed: `.desurf` present from `desurf seal` (or legacy sidecar without source)
+ * - recorded: `.desurf` present from `desurf record`
  */
-export type CassetteState = "unsealed" | "sealed";
+export type CassetteState = "unsealed" | "sealed" | "recorded";
 
 /** Aggregated result for one test case after N executions. */
 export type CaseReliability = {
