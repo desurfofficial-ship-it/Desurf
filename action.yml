@@ -5,7 +5,11 @@
 #   1 = REGRESSION / FLAKY (job fails)
 #   2 = ERROR (job fails)
 #
-# Does NOT call live providers. Does NOT require OPENROUTER_API_KEY.
+# The Action installs the published npm package (not the Action checkout).
+# Action ref (uses: ...@ref) and npm package version are independent pins.
+#
+# Network is used only to install the npm package. The Desurf test gate itself
+# is offline: no live provider, no OPENROUTER_API_KEY, no record command.
 
 name: Desurf Offline Gate
 description: >
@@ -21,16 +25,24 @@ inputs:
   suite:
     description: >
       Path to a Desurf suite directory (or suite.json), relative to the
-      consumer repository root ($GITHUB_WORKSPACE).
+      consumer repository root ($GITHUB_WORKSPACE). Spaces are supported.
     required: true
+  version:
+    description: >
+      Published npm package version of @desurfofficial-ship-it/desurf to install
+      (e.g. "0.3.0"). Defaults to the current stable release. Do not use "latest".
+      Independent of the Action ref (uses: desurfofficial-ship-it/Desurf@...).
+    required: false
+    default: "0.3.0"
   package-version:
     description: >
-      Optional version of the published @desurfofficial-ship-it/desurf package
-      (e.g. "0.3.0"). Empty string uses the latest published version.
+      Deprecated alias for `version`. Prefer `version`. If both are set, `version` wins.
     required: false
     default: ""
   node-version:
-    description: Node.js version for setup-node (Desurf requires >=18).
+    description: >
+      Node.js version for setup-node. Desurf requires Node >=18 (engines field).
+      Default 22 matches this repository's CI.
     required: false
     default: "22"
 
@@ -45,31 +57,64 @@ runs:
     - name: Run Desurf offline gate
       shell: bash
       env:
-        DESURF_PROVIDER: offline
+        DESURF_SUITE: ${{ inputs.suite }}
+        DESURF_VERSION: ${{ inputs.version }}
+        DESURF_PACKAGE_VERSION: ${{ inputs.package-version }}
+        DESURF_NODE_VERSION: ${{ inputs.node-version }}
       run: |
         set -euo pipefail
-        SUITE="${{ inputs.suite }}"
+
+        VER="${DESURF_VERSION:-}"
+        if [ -z "$VER" ] && [ -n "${DESURF_PACKAGE_VERSION:-}" ]; then
+          VER="$DESURF_PACKAGE_VERSION"
+        fi
+        if [ -z "$VER" ] || [ "$VER" = "latest" ]; then
+          echo "Desurf Action error: package version must be an explicit semver (got '${VER:-empty}'). Do not use 'latest'." >&2
+          exit 2
+        fi
+
+        NODE_MAJOR=$(node -p "process.versions.node.split('.')[0]")
+        if [ "$NODE_MAJOR" -lt 18 ]; then
+          echo "Desurf Action error: Node >=18 required (got $(node -v); input node-version=${DESURF_NODE_VERSION:-})" >&2
+          exit 2
+        fi
+
+        SUITE="${DESURF_SUITE:-}"
         if [ -z "$SUITE" ]; then
           echo "Desurf Action error: input 'suite' is required" >&2
           exit 2
         fi
+
         if [ ! -e "$SUITE" ]; then
           echo "Desurf Action error: suite path not found: $SUITE" >&2
           echo "(resolved under GITHUB_WORKSPACE=$(pwd))" >&2
           exit 2
         fi
-
-        PKG="@desurfofficial-ship-it/desurf"
-        VER="${{ inputs.package-version }}"
-        if [ -n "$VER" ]; then
-          SPEC="${PKG}@${VER}"
-        else
-          SPEC="${PKG}"
+        SUITE_ABS=$(cd "$(dirname "$SUITE")" && pwd)/$(basename "$SUITE")
+        if [ ! -e "$SUITE_ABS" ]; then
+          echo "Desurf Action error: suite path not found after resolve: $SUITE_ABS" >&2
+          exit 2
         fi
 
+        PKG="@desurfofficial-ship-it/desurf"
+        SPEC="${PKG}@${VER}"
+
+        INSTALL_DIR=$(mktemp -d)
+        cleanup() { rm -rf "$INSTALL_DIR"; }
+        trap cleanup EXIT
+
         echo "Desurf offline gate"
-        echo "  package: $SPEC"
-        echo "  suite:   $SUITE"
+        echo "  package:  $SPEC"
+        echo "  suite:    $SUITE_ABS"
         echo "  provider: offline (default)"
-        # Exit code from desurf is the quality gate (0/1/2).
-        npx --yes "$SPEC" test --suite "$SUITE"
+        echo "  install:  $INSTALL_DIR (temporary; consumer workspace unchanged)"
+
+        npm install --prefix "$INSTALL_DIR" --no-save --no-package-lock "$SPEC"
+
+        DESURF_BIN="$INSTALL_DIR/node_modules/.bin/desurf"
+        if [ ! -x "$DESURF_BIN" ]; then
+          echo "Desurf Action error: desurf binary not found after install" >&2
+          exit 2
+        fi
+
+        "$DESURF_BIN" test --suite "$SUITE_ABS"
