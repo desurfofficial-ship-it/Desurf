@@ -62,7 +62,7 @@ async function recordOne(
     });
 
     await writeFile(testCase.outputPath, output.text, "utf8");
-    await writeCassetteMeta(testCase.outputPath, inputText, promptText);
+    await writeCassetteMeta(testCase.outputPath, inputText, promptText, "record");
 
     return {
       caseId: testCase.id,
