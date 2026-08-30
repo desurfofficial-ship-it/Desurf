@@ -732,38 +732,6 @@ async function main(): Promise<number> {
   }
 }
 
-async function flushAndExit(code: number): Promise<void> {
-  process.exitCode = code;
-
-  // Flush stdout and stderr before exiting process to avoid pipe truncation
-  await new Promise<void>((resolve) => {
-    let pending = 2;
-    const finish = () => {
-      pending--;
-      if (pending <= 0) {
-        resolve();
-      }
-    };
-
-    if (!process.stdout.writableLength || process.stdout.write("")) {
-      finish();
-    } else {
-      process.stdout.once("drain", finish);
-    }
-
-    if (!process.stderr.writableLength || process.stderr.write("")) {
-      finish();
-    } else {
-      process.stderr.once("drain", finish);
-    }
-
-    const timer = setTimeout(() => resolve(), 5000);
-    timer.unref?.();
-  });
-
-  process.exit(code);
-}
-
 process.stdout.on("error", (err: any) => {
   if (err && (err.code === "EPIPE" || err.code === "ERR_STREAM_DESTROYED")) {
     process.exit(0);
@@ -776,10 +744,18 @@ process.stderr.on("error", (err: any) => {
   }
 });
 
-main()
-  .then((code) => flushAndExit(code))
-  .catch((err) => {
+main().then(
+  (code) => {
+    // Set the exit code WITHOUT force-killing the process: process.exit()
+    // discards pending async stdout writes, which deterministically truncates
+    // piped `--json` output at the OS pipe buffer size (65,536 bytes on Linux)
+    // while still reporting success. Letting the event loop drain guarantees
+    // every byte reaches the consumer (jq, CI log capture, tee, ...).
+    process.exitCode = code;
+  },
+  (err) => {
     console.error(err instanceof Error ? err.message : String(err));
-    flushAndExit(2);
-  });
+    process.exitCode = 2;
+  }
+);
 
