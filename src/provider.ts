@@ -11,6 +11,7 @@ import type { ExecuteRequest, ModelAdapter, ModelOutput } from "./types.js";
  * Makes the whole system offline-first and deterministic.
  */
 export class SavedOutputAdapter implements ModelAdapter {
+  readonly name = "offline";
   async execute(request: ExecuteRequest): Promise<ModelOutput> {
     if (!request.outputPath) {
       throw new Error(

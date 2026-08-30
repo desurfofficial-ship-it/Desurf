@@ -3,6 +3,7 @@
  * Pure functions — no I/O, no CLI, no provider knowledge.
  */
 
+import vm from "node:vm";
 import type { Assertion, AssertionResult, ModelOutput } from "./types.js";
 
 function includesWithCase(
@@ -53,7 +54,25 @@ function evaluateRegex(
 ): AssertionResult {
   try {
     const re = new RegExp(pattern, flags ?? "");
-    const passed = re.test(output.text);
+    let passed = false;
+    try {
+      const script = new vm.Script("re.test(text)");
+      const context = vm.createContext({ re, text: output.text });
+      passed = Boolean(script.runInContext(context, { timeout: 1000 }));
+    } catch (vmErr: any) {
+      if (
+        vmErr &&
+        (vmErr.code === "ERR_SCRIPT_EXECUTION_TIMEOUT" ||
+          String(vmErr.message).includes("timed out"))
+      ) {
+        return {
+          assertion: { type: "regex", pattern, flags },
+          passed: false,
+          message: `Regex evaluation timed out (potential ReDoS): /${pattern}/${flags ?? ""}`,
+        };
+      }
+      passed = re.test(output.text);
+    }
     return {
       assertion: { type: "regex", pattern, flags },
       passed,

@@ -5,6 +5,9 @@
 import { describe, it, expect } from "vitest";
 import { createProvider } from "../src/create-provider.js";
 import { OpenRouterAdapter } from "../src/openrouter.js";
+import { OpenAIAdapter } from "../src/openai.js";
+import { AnthropicAdapter } from "../src/anthropic.js";
+import { GeminiAdapter } from "../src/gemini.js";
 import { SavedOutputAdapter } from "../src/provider.js";
 import { runSuite } from "../src/runner.js";
 import { resolve } from "node:path";
@@ -33,12 +36,33 @@ describe("provider selection + offline default", () => {
     expect(summary.cases[0].state).toBe("PASS");
   });
 
-  it("createProvider aliases", () => {
+  it("createProvider aliases and provider instantiations", () => {
     expect(createProvider({ provider: "saved" })).toBeInstanceOf(
+      SavedOutputAdapter
+    );
+    expect(createProvider({ provider: "saved-output" })).toBeInstanceOf(
       SavedOutputAdapter
     );
     expect(createProvider({ provider: "OpenRouter" })).toBeInstanceOf(
       OpenRouterAdapter
+    );
+    expect(createProvider({ provider: "openai" })).toBeInstanceOf(
+      OpenAIAdapter
+    );
+    expect(createProvider({ provider: "anthropic" })).toBeInstanceOf(
+      AnthropicAdapter
+    );
+    expect(createProvider({ provider: "gemini" })).toBeInstanceOf(
+      GeminiAdapter
+    );
+    expect(createProvider({ provider: "google" })).toBeInstanceOf(
+      GeminiAdapter
+    );
+  });
+
+  it("rejects unknown provider with clear error message listing supported providers", () => {
+    expect(() => createProvider({ provider: "unknown-ai" })).toThrow(
+      /Unknown provider: "unknown-ai"\. Supported: offline, openrouter, openai, anthropic, gemini/
     );
   });
 });

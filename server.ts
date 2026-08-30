@@ -59,6 +59,10 @@ app.get("/api/health", (_req, res) => {
 // Environment configuration check
 app.get("/api/env-status", (_req, res) => {
   res.json({
+    openrouter: Boolean(process.env.OPENROUTER_API_KEY && process.env.OPENROUTER_API_KEY.trim().length > 0),
+    openai: Boolean(process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY.trim().length > 0),
+    anthropic: Boolean(process.env.ANTHROPIC_API_KEY && process.env.ANTHROPIC_API_KEY.trim().length > 0),
+    gemini: Boolean((process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY.trim().length > 0) || (process.env.GOOGLE_API_KEY && process.env.GOOGLE_API_KEY.trim().length > 0)),
     openRouterKeyConfigured: Boolean(process.env.OPENROUTER_API_KEY && process.env.OPENROUTER_API_KEY.trim().length > 0),
   });
 });

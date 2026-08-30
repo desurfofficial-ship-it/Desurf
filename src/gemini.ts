@@ -1,61 +1,64 @@
 /**
- * OpenRouter live provider.
- * Implements ModelAdapter. All HTTP and response parsing stay here.
+ * Google Gemini live provider.
+ * Implements ModelAdapter. Native fetch only.
  * Does not log or expose API credentials.
  */
 
 import type { ExecuteRequest, ModelAdapter, ModelOutput } from "./types.js";
 
-const DEFAULT_MODEL = "openai/gpt-4o-mini";
-const DEFAULT_BASE_URL = "https://openrouter.ai/api/v1";
-/** Request timeout for live OpenRouter calls (ms). */
+const DEFAULT_MODEL = "gemini-2.0-flash";
+const DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com/v1beta";
 const DEFAULT_TIMEOUT_MS = 30_000;
 
-export type OpenRouterAdapterOptions = {
-  /** Defaults to process.env.OPENROUTER_API_KEY */
+export type GeminiAdapterOptions = {
+  /** Defaults to process.env.GEMINI_API_KEY or process.env.GOOGLE_API_KEY */
   apiKey?: string;
-  /** Defaults to openai/gpt-4o-mini */
+  /** Defaults to gemini-2.0-flash */
   model?: string;
-  /** Defaults to https://openrouter.ai/api/v1 */
+  /** Defaults to https://generativelanguage.googleapis.com/v1beta */
   baseUrl?: string;
   /** Injected for tests; defaults to global fetch */
   fetch?: typeof globalThis.fetch;
 };
 
-type ChatCompletionsBody = {
-  choices?: Array<{
-    message?: { content?: string | null };
+type GenerateContentResponseBody = {
+  candidates?: Array<{
+    content?: {
+      parts?: Array<{ text?: string }>;
+    };
   }>;
   error?: { message?: string };
 };
 
-/** Minimal response shape (avoids depending on DOM Response typings). */
 type HttpResponse = {
   ok: boolean;
   status: number;
   text(): Promise<string>;
 };
 
-/** Strip API key from any error text so it never appears in CLI/output. */
 function redactSecrets(message: string, apiKey: string): string {
   if (!apiKey) return message;
   return message.split(apiKey).join("[redacted]");
 }
 
-export class OpenRouterAdapter implements ModelAdapter {
-  readonly name = "openrouter";
+export class GeminiAdapter implements ModelAdapter {
+  readonly name = "gemini";
   private readonly apiKey: string;
   private readonly model: string;
   private readonly baseUrl: string;
   private readonly fetchFn: typeof globalThis.fetch;
 
-  constructor(options: OpenRouterAdapterOptions = {}) {
-    const key = options.apiKey ?? process.env.OPENROUTER_API_KEY ?? "";
+  constructor(options: GeminiAdapterOptions = {}) {
+    const key =
+      options.apiKey ??
+      process.env.GEMINI_API_KEY ??
+      process.env.GOOGLE_API_KEY ??
+      "";
     this.apiKey = key.trim();
     this.model = options.model ?? DEFAULT_MODEL;
     this.baseUrl = (
       options.baseUrl ??
-      process.env.OPENROUTER_BASE_URL ??
+      process.env.GEMINI_BASE_URL ??
       DEFAULT_BASE_URL
     ).replace(/\/$/, "");
     this.fetchFn = options.fetch ?? globalThis.fetch.bind(globalThis);
@@ -64,34 +67,34 @@ export class OpenRouterAdapter implements ModelAdapter {
   async execute(request: ExecuteRequest): Promise<ModelOutput> {
     if (!this.apiKey) {
       throw new Error(
-        "OpenRouterAdapter: missing API key. Set OPENROUTER_API_KEY in the environment."
+        "GeminiAdapter: missing API key. Set GEMINI_API_KEY or GOOGLE_API_KEY in the environment."
       );
     }
 
     if (typeof this.fetchFn !== "function") {
-      throw new Error(
-        "OpenRouterAdapter: fetch is not available in this runtime."
-      );
+      throw new Error("GeminiAdapter: fetch is not available in this runtime.");
     }
 
     const selectedModel = request.model ?? this.model;
-    // Live path ignores outputPath; input + prompt form the user message.
     const userContent = [request.prompt.trim(), request.input.trim()]
       .filter(Boolean)
       .join("\n\n");
 
-    const url = `${this.baseUrl}/chat/completions`;
+    const url = `${this.baseUrl}/models/${encodeURIComponent(selectedModel)}:generateContent?key=${encodeURIComponent(this.apiKey)}`;
     let response: HttpResponse;
     try {
       response = (await this.fetchFn(url, {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${this.apiKey}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          model: selectedModel,
-          messages: [{ role: "user", content: userContent }],
+          contents: [
+            {
+              role: "user",
+              parts: [{ text: userContent }],
+            },
+          ],
         }),
         signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS),
       })) as HttpResponse;
@@ -105,43 +108,49 @@ export class OpenRouterAdapter implements ModelAdapter {
         /aborted|timeout/i.test(msg)
       ) {
         throw new Error(
-          `OpenRouterAdapter: request timed out after ${DEFAULT_TIMEOUT_MS}ms`
+          `GeminiAdapter: request timed out after ${DEFAULT_TIMEOUT_MS}ms`
         );
       }
-      throw new Error(`OpenRouterAdapter: network error: ${msg}`);
+      throw new Error(`GeminiAdapter: network error: ${msg}`);
     }
 
     const rawText = await response.text();
     if (!response.ok) {
       let detail = rawText.slice(0, 200);
       try {
-        const parsed = JSON.parse(rawText) as ChatCompletionsBody;
+        const parsed = JSON.parse(rawText) as GenerateContentResponseBody;
         if (parsed.error?.message) detail = parsed.error.message;
       } catch {
         // keep truncated raw body
       }
       throw new Error(
-        `OpenRouterAdapter: HTTP ${response.status}: ${redactSecrets(detail, this.apiKey)}`
+        `GeminiAdapter: HTTP ${response.status}: ${redactSecrets(detail, this.apiKey)}`
       );
     }
 
-    let body: ChatCompletionsBody;
+    let body: GenerateContentResponseBody;
     try {
-      body = JSON.parse(rawText) as ChatCompletionsBody;
+      body = JSON.parse(rawText) as GenerateContentResponseBody;
     } catch {
-      throw new Error("OpenRouterAdapter: response was not valid JSON");
+      throw new Error("GeminiAdapter: response was not valid JSON");
     }
 
-    const text = body.choices?.[0]?.message?.content;
-    if (typeof text !== "string" || text.length === 0) {
+    const parts = body.candidates?.[0]?.content?.parts;
+    const textParts =
+      parts
+        ?.filter((p) => typeof p.text === "string")
+        .map((p) => p.text as string) ?? [];
+
+    const text = textParts.join("");
+    if (!text || text.length === 0) {
       throw new Error(
-        "OpenRouterAdapter: empty or missing message content in response"
+        "GeminiAdapter: empty or missing message content in response"
       );
     }
 
     return {
       text,
-      provider: "openrouter",
+      provider: "gemini",
       model: selectedModel,
     };
   }

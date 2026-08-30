@@ -58,8 +58,23 @@ desurf test --suite ./my-suite
 **You want a live model capture:**
 
 ```bash
+# OpenRouter
 export OPENROUTER_API_KEY=...
 desurf record --suite ./my-suite --provider openrouter
+
+# OpenAI
+export OPENAI_API_KEY=...
+desurf record --suite ./my-suite --provider openai --model gpt-4o-mini
+
+# Anthropic
+export ANTHROPIC_API_KEY=...
+desurf record --suite ./my-suite --provider anthropic --model claude-3-5-haiku-20241022
+
+# Google Gemini
+export GEMINI_API_KEY=...
+desurf record --suite ./my-suite --provider gemini --model gemini-2.0-flash
+
+# Deterministic offline gate
 desurf test --suite ./my-suite
 ```
 
@@ -70,7 +85,7 @@ desurf test --suite ./my-suite
    - **Keep the existing output** and re-fingerprint current prompt/input (offline, no API key):
      `desurf seal --suite ./my-suite --force`
    - **Obtain a new provider output** and provenance:
-     `desurf record --suite ./my-suite --provider openrouter --force`
+     `desurf record --suite ./my-suite --provider <name> --force`
    - Or restore the previous prompt/input files.
 
 ### Why exit 2 vs exit 1?
@@ -112,10 +127,11 @@ desurf test (offline) ← evaluates behavioral contract deterministically
 
 ## Commands
 
-- `desurf test --suite <path> [--verbose] [--json] [--repeat N] [--provider offline|openrouter]`
+- `desurf test --suite <path> [--verbose] [--json] [--repeat N] [--provider offline|openrouter|openai|anthropic|gemini] [--model id]`
 - `desurf init <directory>` — scaffold a runnable structured-output example suite (refuses overwrite)
-- `desurf record --suite <path> --provider openrouter [--force] [--case id]` — capture live provider outputs
+- `desurf record --suite <path> --provider <name> [--model id] [--force] [--case id]` — capture live provider outputs
 - `desurf seal --suite <path> [--force] [--case id]` — establish offline provenance from existing output files
+- `desurf inspect --suite <path> [--json] [--case id]` — inspect cassette provenance status (read-only)
 
 Exit codes: **0** PASS · **1** REGRESSION/FLAKY · **2** ERROR
 

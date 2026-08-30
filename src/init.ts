@@ -11,9 +11,10 @@
  * immediately sees: input → prompt → saved output → assertions → deterministic result.
  */
 
-import { mkdir, writeFile, access, constants } from "node:fs/promises";
+import { mkdir, access, constants } from "node:fs/promises";
 import { resolve, basename, join } from "node:path";
 import { writeCassetteMeta } from "./fingerprint.js";
+import { atomicWriteFile } from "./fs-utils.js";
 
 const INPUT_TXT = `My app keeps crashing when I try to export a report. Error code: OPS-503.
 `;
@@ -110,11 +111,11 @@ export async function initSuite(targetDir: string): Promise<string> {
 
   const name = basename(abs) || "my-suite";
 
-  await writeFile(suiteJson, buildSuiteJson(name), "utf8");
-  await writeFile(join(inputsDir, "support-request.txt"), INPUT_TXT, "utf8");
-  await writeFile(join(promptsDir, "classify.txt"), PROMPT_TXT, "utf8");
+  await atomicWriteFile(suiteJson, buildSuiteJson(name), "utf8");
+  await atomicWriteFile(join(inputsDir, "support-request.txt"), INPUT_TXT, "utf8");
+  await atomicWriteFile(join(promptsDir, "classify.txt"), PROMPT_TXT, "utf8");
   const outputPath = join(outputsDir, "classify.json");
-  await writeFile(outputPath, OUTPUT_JSON, "utf8");
+  await atomicWriteFile(outputPath, OUTPUT_JSON, "utf8");
   await writeCassetteMeta(outputPath, INPUT_TXT, PROMPT_TXT);
 
   return abs;

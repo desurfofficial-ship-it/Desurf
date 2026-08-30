@@ -74,14 +74,17 @@ Options:
   --suite <path>       Path to suite directory (or suite.json) (required)
   --case <id>          Run only the named test case
   --repeat <n>         Execute each case N times (default 1)
-  --provider <name>    offline (default) | openrouter
-  --model <id>         Model id for live providers (default: openai/gpt-4o-mini)
+  --provider <name>    offline (default) | openrouter | openai | anthropic | gemini
+  --model <id>         Model id for live providers (uses provider default if omitted)
   --verbose            Extra diagnostic output (no secrets)
   --json               Machine-readable JSON on stdout (diagnostics on stderr)
   --help, -h           Show this help
 
-Environment (openrouter only):
-  OPENROUTER_API_KEY   API key for OpenRouter (never printed)
+Environment (live providers only):
+  OPENROUTER_API_KEY   API key for openrouter (never printed)
+  OPENAI_API_KEY       API key for openai (never printed)
+  ANTHROPIC_API_KEY    API key for anthropic (never printed)
+  GEMINI_API_KEY       API key for gemini (or GOOGLE_API_KEY) (never printed)
 
 Exit codes:
   0  all tests PASS
@@ -118,18 +121,21 @@ function printRecordHelp(): void {
   console.log(`desurf record — capture live provider output into suite files
 
 Usage:
-  desurf record --suite <path> --provider openrouter [options]
+  desurf record --suite <path> --provider <name> [options]
 
 Options:
   --suite <path>       Path to suite directory (or suite.json) (required)
-  --provider <name>    Must be a live provider (openrouter). offline is rejected
-  --model <id>         Model id (default: openai/gpt-4o-mini)
+  --provider <name>    Live provider: openrouter | openai | anthropic | gemini (required)
+  --model <id>         Model id (uses provider default if omitted)
   --case <id>          Record only the named test case
   --force              Overwrite existing non-empty output files
   --help, -h           Show this help
 
 Environment:
   OPENROUTER_API_KEY   Required for openrouter (never printed)
+  OPENAI_API_KEY       Required for openai (never printed)
+  ANTHROPIC_API_KEY    Required for anthropic (never printed)
+  GEMINI_API_KEY       Required for gemini (or GOOGLE_API_KEY) (never printed)
 
 Notes:
   - Does not evaluate assertions; only captures provider output.
@@ -224,19 +230,13 @@ function parseArgs(argv: string[]): ParsedArgs {
     return result;
   }
 
-  for (let i = 0; i < args.length; i++) {
-    const a = args[i];
-    if (a === "--version" || a === "-v") {
-      result.version = true;
-    }
-  }
-  if (result.version) {
+  const first = args[0];
+  if (first === "--version" || first === "-v") {
+    result.version = true;
     result.command = "version";
     return result;
   }
 
-  let i = 0;
-  const first = args[0];
   if (first === "--help" || first === "-h") {
     result.help = true;
     result.command = "help";
@@ -244,7 +244,7 @@ function parseArgs(argv: string[]): ParsedArgs {
   }
 
   result.command = first;
-  i = 1;
+  let i = 1;
 
   while (i < args.length) {
     const a = args[i];
@@ -273,8 +273,12 @@ function parseArgs(argv: string[]): ParsedArgs {
     } else if (a === "--force") {
       result.force = true;
       i++;
-    } else if (a === "--verbose") {
-      result.verbose = true;
+    } else if (a === "--verbose" || a === "-v") {
+      if (first === "test") {
+        result.verbose = true;
+      } else {
+        throw new Error(`Unknown option: ${a}`);
+      }
       i++;
     } else if (a === "--json") {
       result.json = true;
@@ -462,7 +466,9 @@ async function cmdRecord(parsed: ParsedArgs): Promise<number> {
     return 2;
   }
   if (!parsed.provider) {
-    console.error("Missing required option: --provider <name> (e.g. openrouter)");
+    console.error(
+      "Missing required option: --provider <name> (e.g. openrouter, openai, anthropic, gemini)"
+    );
     printRecordHelp();
     return 2;
   }
@@ -474,7 +480,7 @@ async function cmdRecord(parsed: ParsedArgs): Promise<number> {
     providerName === "saved-output"
   ) {
     console.error(
-      "record requires a live provider (e.g. openrouter). Offline provider cannot capture new outputs."
+      "record requires a live provider (e.g. openrouter, openai, anthropic, gemini). Offline provider cannot capture new outputs."
     );
     return 2;
   }
@@ -495,6 +501,7 @@ async function cmdRecord(parsed: ParsedArgs): Promise<number> {
       suitePath: resolve(parsed.suite),
       provider,
       providerName,
+      model: parsed.model,
       caseId: parsed.caseId,
       force: parsed.force,
     });
@@ -674,6 +681,54 @@ async function main(): Promise<number> {
   }
 }
 
-main().then((code) => {
+async function flushAndExit(code: number): Promise<void> {
+  process.exitCode = code;
+
+  // Flush stdout and stderr before exiting process to avoid pipe truncation
+  await new Promise<void>((resolve) => {
+    let pending = 2;
+    const finish = () => {
+      pending--;
+      if (pending <= 0) {
+        resolve();
+      }
+    };
+
+    if (!process.stdout.writableLength || process.stdout.write("")) {
+      finish();
+    } else {
+      process.stdout.once("drain", finish);
+    }
+
+    if (!process.stderr.writableLength || process.stderr.write("")) {
+      finish();
+    } else {
+      process.stderr.once("drain", finish);
+    }
+
+    const timer = setTimeout(() => resolve(), 5000);
+    timer.unref?.();
+  });
+
   process.exit(code);
+}
+
+process.stdout.on("error", (err: any) => {
+  if (err && (err.code === "EPIPE" || err.code === "ERR_STREAM_DESTROYED")) {
+    process.exit(0);
+  }
 });
+
+process.stderr.on("error", (err: any) => {
+  if (err && (err.code === "EPIPE" || err.code === "ERR_STREAM_DESTROYED")) {
+    process.exit(0);
+  }
+});
+
+main()
+  .then((code) => flushAndExit(code))
+  .catch((err) => {
+    console.error(err instanceof Error ? err.message : String(err));
+    flushAndExit(2);
+  });
+

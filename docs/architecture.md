@@ -12,7 +12,7 @@ Desurf is a small offline-first CLI for prompt regression testing.
 6. **Runner** (`src/runner.ts`) — orchestrates load → provider → engine → reliability summary.
 7. **Engine** (`src/engine.ts`) — pure: TestCase + ModelOutput → TestResult.
 8. **Assertions** (`src/assertions.ts`) — pure evaluation of required / forbidden / regex / json_schema.
-9. **Providers** (`src/provider.ts`, `src/openrouter.ts`, `src/create-provider.ts`) — `ModelAdapter` interface; offline saved-output vs OpenRouter.
+9. **Providers** (`src/provider.ts`, `src/openrouter.ts`, `src/openai.ts`, `src/anthropic.ts`, `src/gemini.ts`, `src/create-provider.ts`) — `ModelAdapter` interface; offline saved-output vs live providers (OpenRouter, OpenAI, Anthropic, Gemini). Providers handle authentication, request serialization, and response normalization; the core engine remains provider-agnostic.
 10. **Reliability** (`src/repeat.ts`) — PASS / FLAKY / REGRESSION / ERROR from N executions.
 11. **Fingerprint** (`src/fingerprint.ts`) — SHA-256 sidecar calculation and stale-fixture detection.
 

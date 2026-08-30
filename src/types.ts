@@ -31,6 +31,9 @@ export type Suite = {
 /** Output produced by a model (or loaded from a saved file). */
 export type ModelOutput = {
   text: string;
+  provider?: string;
+  model?: string;
+  metadata?: Record<string, unknown>;
 };
 
 /** Result of evaluating one assertion. */
@@ -83,9 +86,12 @@ export type ExecuteRequest = {
   prompt: string;
   /** Absolute path to the expected saved output (offline mode). */
   outputPath?: string;
+  /** Optional model id override */
+  model?: string;
 };
 
 /** Provider interface — engine depends only on this. */
 export interface ModelAdapter {
+  readonly name?: string;
   execute(request: ExecuteRequest): Promise<ModelOutput>;
 }

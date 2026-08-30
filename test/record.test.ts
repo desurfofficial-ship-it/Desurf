@@ -31,19 +31,29 @@ describe("desurf record", () => {
     await rm(dir, { recursive: true, force: true });
   });
 
-  it("successful capture with force", async () => {
+  it("successful capture with force writes output and provenance metadata with provider and model", async () => {
     const suite = join(dir, "suite");
     await initSuite(suite);
     const provider = new MockProvider("captured-live-output");
     const summary = await recordSuite({
       suitePath: suite,
       provider,
-      providerName: "openrouter",
+      providerName: "openai",
+      model: "gpt-4o-mini",
       force: true,
     });
     expect(summary.results[0].status).toBe("recorded");
     const text = await readFile(join(suite, "outputs", "classify.json"), "utf8");
     expect(text).toBe("captured-live-output");
+
+    const meta = JSON.parse(
+      await readFile(join(suite, "outputs", "classify.json.desurf"), "utf8")
+    );
+    expect(meta.source).toBe("record");
+    expect(meta.provider).toBe("openai");
+    expect(meta.model).toBe("gpt-4o-mini");
+    expect(meta.inputSha256).toBeDefined();
+    expect(meta.promptSha256).toBeDefined();
   });
 
   it("existing non-empty output is skipped without force", async () => {

@@ -32,7 +32,11 @@ describe("OpenRouterAdapter", () => {
       prompt: "Reply with exactly: DESURF_OK",
     });
 
-    expect(out).toEqual({ text: "DESURF_OK" });
+    expect(out).toEqual({
+      text: "DESURF_OK",
+      provider: "openrouter",
+      model: "openai/gpt-4o-mini",
+    });
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, init] = fetchMock.mock.calls[0];
     expect(String(url)).toContain("/chat/completions");

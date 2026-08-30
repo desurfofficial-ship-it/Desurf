@@ -46,8 +46,18 @@ After prompt or input changes on a sealed/recorded suite, `desurf test` returns 
 | `--suite <path>` | Path to a test suite directory or suite.json | Required for normal usage |
 | `--case <id>` | Run only the named test case | Optional |
 | `--repeat <n>` | Execute each selected case N times | Default 1 |
-| `--provider <name>` | `offline` (default) or `openrouter` | Offline uses saved outputs; openrouter is live |
-| `--model <id>` | Model id for live providers | Default for openrouter: `openai/gpt-4o-mini` |
+| `--provider <name>` | `offline` (default), `openrouter`, `openai`, `anthropic`, `gemini` | Offline uses saved outputs; other providers are live |
+| `--model <id>` | Model id for live providers | Uses provider default if omitted (`openai/gpt-4o-mini`, `gpt-4o-mini`, `claude-3-5-haiku-20241022`, `gemini-2.0-flash`) |
+
+## Record options
+
+| Option | Meaning | Notes |
+|--------|---------|-------|
+| `--suite <path>` | Path to a test suite directory or suite.json | Required |
+| `--provider <name>` | `openrouter`, `openai`, `anthropic`, `gemini` | Required live provider (offline is rejected) |
+| `--model <id>` | Model id for live providers | Uses provider default if omitted |
+| `--case <id>` | Record only the named test case | Optional |
+| `--force` | Overwrite existing non-empty output files | Optional (skips by default) |
 
 ## Seal options
 
@@ -68,7 +78,10 @@ Seal rules (public behavior):
 
 | Variable | When required |
 |----------|----------------|
-| `OPENROUTER_API_KEY` | Only when `--provider openrouter` (test or record) |
+| `OPENROUTER_API_KEY` | When `--provider openrouter` (test or record) |
+| `OPENAI_API_KEY` | When `--provider openai` (test or record) |
+| `ANTHROPIC_API_KEY` | When `--provider anthropic` (test or record) |
+| `GEMINI_API_KEY` / `GOOGLE_API_KEY` | When `--provider gemini` (test or record) |
 
 Never commit API keys. Prefer the shell environment or a gitignored local `.env`.
 
@@ -77,7 +90,7 @@ Never commit API keys. Prefer the shell environment or a gitignored local `.env`
 | Mode | Provider | Deterministic? | Typical use |
 |------|----------|----------------|-------------|
 | **Offline** (default) | Saved outputs on disk | Yes | Contract suites, required CI |
-| **Live** | e.g. OpenRouter | No | Optional check of a real model against a contract |
+| **Live** | e.g. OpenRouter, OpenAI, Anthropic, Gemini | No | Optional capture/check of a real model against a contract |
 
 Suites such as `fixtures/basic` and `examples/support-agent` are **behavioral-contract tests**, not provider-health smoke tests. Offline, they use fixed saved outputs. Against a live model, the **same assertions** run on variable model text—**PASS is not guaranteed**.
 

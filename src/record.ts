@@ -2,15 +2,17 @@
  * desurf record — run a live provider and save outputs into the suite.
  */
 
-import { writeFile, access, constants, stat, readFile } from "node:fs/promises";
+import { access, constants, stat, readFile } from "node:fs/promises";
 import { loadSuite } from "./offline.js";
 import { writeCassetteMeta } from "./fingerprint.js";
+import { atomicWriteFile } from "./fs-utils.js";
 import type { ModelAdapter, Suite, TestCase } from "./types.js";
 
 export type RecordOptions = {
   suitePath: string;
   provider: ModelAdapter;
   providerName: string;
+  model?: string;
   caseId?: string;
   force?: boolean;
 };
@@ -39,6 +41,8 @@ async function isNonEmptyFile(path: string): Promise<boolean> {
 async function recordOne(
   testCase: TestCase,
   provider: ModelAdapter,
+  providerName: string,
+  model: string | undefined,
   force: boolean
 ): Promise<RecordCaseResult> {
   try {
@@ -59,10 +63,18 @@ async function recordOne(
       input: inputText,
       prompt: promptText,
       outputPath: testCase.outputPath,
+      model,
     });
 
-    await writeFile(testCase.outputPath, output.text, "utf8");
-    await writeCassetteMeta(testCase.outputPath, inputText, promptText, "record");
+    await atomicWriteFile(testCase.outputPath, output.text, "utf8");
+    await writeCassetteMeta(
+      testCase.outputPath,
+      inputText,
+      promptText,
+      "record",
+      output.provider ?? providerName,
+      output.model ?? model
+    );
 
     return {
       caseId: testCase.id,
@@ -87,7 +99,7 @@ export async function recordSuite(
     options.providerName === "saved-output"
   ) {
     throw new Error(
-      `record requires a live provider (e.g. openrouter). Offline provider cannot capture new outputs.`
+      `record requires a live provider (e.g. openrouter, openai, anthropic, gemini). Offline provider cannot capture new outputs.`
     );
   }
 
@@ -105,7 +117,15 @@ export async function recordSuite(
 
   const results: RecordCaseResult[] = [];
   for (const c of cases) {
-    results.push(await recordOne(c, options.provider, options.force === true));
+    results.push(
+      await recordOne(
+        c,
+        options.provider,
+        options.providerName,
+        options.model,
+        options.force === true
+      )
+    );
   }
 
   return {

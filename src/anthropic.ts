@@ -1,61 +1,60 @@
 /**
- * OpenRouter live provider.
- * Implements ModelAdapter. All HTTP and response parsing stay here.
+ * Anthropic live provider.
+ * Implements ModelAdapter. Native fetch only.
  * Does not log or expose API credentials.
  */
 
 import type { ExecuteRequest, ModelAdapter, ModelOutput } from "./types.js";
 
-const DEFAULT_MODEL = "openai/gpt-4o-mini";
-const DEFAULT_BASE_URL = "https://openrouter.ai/api/v1";
-/** Request timeout for live OpenRouter calls (ms). */
+const DEFAULT_MODEL = "claude-3-5-haiku-20241022";
+const DEFAULT_BASE_URL = "https://api.anthropic.com/v1";
 const DEFAULT_TIMEOUT_MS = 30_000;
+const ANTHROPIC_VERSION = "2023-06-01";
 
-export type OpenRouterAdapterOptions = {
-  /** Defaults to process.env.OPENROUTER_API_KEY */
+export type AnthropicAdapterOptions = {
+  /** Defaults to process.env.ANTHROPIC_API_KEY */
   apiKey?: string;
-  /** Defaults to openai/gpt-4o-mini */
+  /** Defaults to claude-3-5-haiku-20241022 */
   model?: string;
-  /** Defaults to https://openrouter.ai/api/v1 */
+  /** Defaults to https://api.anthropic.com/v1 */
   baseUrl?: string;
   /** Injected for tests; defaults to global fetch */
   fetch?: typeof globalThis.fetch;
 };
 
-type ChatCompletionsBody = {
-  choices?: Array<{
-    message?: { content?: string | null };
+type MessagesResponseBody = {
+  content?: Array<{
+    type?: string;
+    text?: string;
   }>;
   error?: { message?: string };
 };
 
-/** Minimal response shape (avoids depending on DOM Response typings). */
 type HttpResponse = {
   ok: boolean;
   status: number;
   text(): Promise<string>;
 };
 
-/** Strip API key from any error text so it never appears in CLI/output. */
 function redactSecrets(message: string, apiKey: string): string {
   if (!apiKey) return message;
   return message.split(apiKey).join("[redacted]");
 }
 
-export class OpenRouterAdapter implements ModelAdapter {
-  readonly name = "openrouter";
+export class AnthropicAdapter implements ModelAdapter {
+  readonly name = "anthropic";
   private readonly apiKey: string;
   private readonly model: string;
   private readonly baseUrl: string;
   private readonly fetchFn: typeof globalThis.fetch;
 
-  constructor(options: OpenRouterAdapterOptions = {}) {
-    const key = options.apiKey ?? process.env.OPENROUTER_API_KEY ?? "";
+  constructor(options: AnthropicAdapterOptions = {}) {
+    const key = options.apiKey ?? process.env.ANTHROPIC_API_KEY ?? "";
     this.apiKey = key.trim();
     this.model = options.model ?? DEFAULT_MODEL;
     this.baseUrl = (
       options.baseUrl ??
-      process.env.OPENROUTER_BASE_URL ??
+      process.env.ANTHROPIC_BASE_URL ??
       DEFAULT_BASE_URL
     ).replace(/\/$/, "");
     this.fetchFn = options.fetch ?? globalThis.fetch.bind(globalThis);
@@ -64,33 +63,34 @@ export class OpenRouterAdapter implements ModelAdapter {
   async execute(request: ExecuteRequest): Promise<ModelOutput> {
     if (!this.apiKey) {
       throw new Error(
-        "OpenRouterAdapter: missing API key. Set OPENROUTER_API_KEY in the environment."
+        "AnthropicAdapter: missing API key. Set ANTHROPIC_API_KEY in the environment."
       );
     }
 
     if (typeof this.fetchFn !== "function") {
       throw new Error(
-        "OpenRouterAdapter: fetch is not available in this runtime."
+        "AnthropicAdapter: fetch is not available in this runtime."
       );
     }
 
     const selectedModel = request.model ?? this.model;
-    // Live path ignores outputPath; input + prompt form the user message.
     const userContent = [request.prompt.trim(), request.input.trim()]
       .filter(Boolean)
       .join("\n\n");
 
-    const url = `${this.baseUrl}/chat/completions`;
+    const url = `${this.baseUrl}/messages`;
     let response: HttpResponse;
     try {
       response = (await this.fetchFn(url, {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${this.apiKey}`,
+          "x-api-key": this.apiKey,
+          "anthropic-version": ANTHROPIC_VERSION,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
           model: selectedModel,
+          max_tokens: 4096,
           messages: [{ role: "user", content: userContent }],
         }),
         signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS),
@@ -105,43 +105,50 @@ export class OpenRouterAdapter implements ModelAdapter {
         /aborted|timeout/i.test(msg)
       ) {
         throw new Error(
-          `OpenRouterAdapter: request timed out after ${DEFAULT_TIMEOUT_MS}ms`
+          `AnthropicAdapter: request timed out after ${DEFAULT_TIMEOUT_MS}ms`
         );
       }
-      throw new Error(`OpenRouterAdapter: network error: ${msg}`);
+      throw new Error(`AnthropicAdapter: network error: ${msg}`);
     }
 
     const rawText = await response.text();
     if (!response.ok) {
       let detail = rawText.slice(0, 200);
       try {
-        const parsed = JSON.parse(rawText) as ChatCompletionsBody;
+        const parsed = JSON.parse(rawText) as MessagesResponseBody;
         if (parsed.error?.message) detail = parsed.error.message;
       } catch {
         // keep truncated raw body
       }
       throw new Error(
-        `OpenRouterAdapter: HTTP ${response.status}: ${redactSecrets(detail, this.apiKey)}`
+        `AnthropicAdapter: HTTP ${response.status}: ${redactSecrets(detail, this.apiKey)}`
       );
     }
 
-    let body: ChatCompletionsBody;
+    let body: MessagesResponseBody;
     try {
-      body = JSON.parse(rawText) as ChatCompletionsBody;
+      body = JSON.parse(rawText) as MessagesResponseBody;
     } catch {
-      throw new Error("OpenRouterAdapter: response was not valid JSON");
+      throw new Error("AnthropicAdapter: response was not valid JSON");
     }
 
-    const text = body.choices?.[0]?.message?.content;
-    if (typeof text !== "string" || text.length === 0) {
+    const textBlocks =
+      body.content
+        ?.filter(
+          (block) => block.type === "text" && typeof block.text === "string"
+        )
+        .map((block) => block.text as string) ?? [];
+
+    const text = textBlocks.join("\n");
+    if (!text || text.length === 0) {
       throw new Error(
-        "OpenRouterAdapter: empty or missing message content in response"
+        "AnthropicAdapter: empty or missing message content in response"
       );
     }
 
     return {
       text,
-      provider: "openrouter",
+      provider: "anthropic",
       model: selectedModel,
     };
   }

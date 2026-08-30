@@ -10,7 +10,8 @@
  */
 
 import { createHash } from "node:crypto";
-import { access, constants, readFile, writeFile } from "node:fs/promises";
+import { access, constants, readFile } from "node:fs/promises";
+import { atomicWriteFile } from "./fs-utils.js";
 
 export const META_VERSION = 1;
 
@@ -27,6 +28,10 @@ export type CassetteMeta = {
    * Missing → treat as sealed (legacy provenance present)
    */
   source?: CassetteSource;
+  /** Live provider name when source is "record" */
+  provider?: string;
+  /** Live model id when source is "record" */
+  model?: string;
 };
 
 export function sha256(text: string): string {
@@ -41,7 +46,9 @@ export function metaPathFor(outputPath: string): string {
 export function buildMeta(
   inputText: string,
   promptText: string,
-  source?: CassetteSource
+  source?: CassetteSource,
+  provider?: string,
+  model?: string
 ): CassetteMeta {
   const meta: CassetteMeta = {
     version: META_VERSION,
@@ -51,6 +58,12 @@ export function buildMeta(
   if (source) {
     meta.source = source;
   }
+  if (provider) {
+    meta.provider = provider;
+  }
+  if (model) {
+    meta.model = model;
+  }
   return meta;
 }
 
@@ -58,10 +71,16 @@ export async function writeCassetteMeta(
   outputPath: string,
   inputText: string,
   promptText: string,
-  source?: CassetteSource
+  source?: CassetteSource,
+  provider?: string,
+  model?: string
 ): Promise<void> {
-  const meta = buildMeta(inputText, promptText, source);
-  await writeFile(metaPathFor(outputPath), JSON.stringify(meta, null, 2) + "\n", "utf8");
+  const meta = buildMeta(inputText, promptText, source, provider, model);
+  await atomicWriteFile(
+    metaPathFor(outputPath),
+    JSON.stringify(meta, null, 2) + "\n",
+    "utf8"
+  );
 }
 
 async function pathExists(p: string): Promise<boolean> {

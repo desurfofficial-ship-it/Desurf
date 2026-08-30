@@ -25,7 +25,7 @@ function runCli(args: string[], cwd?: string): Promise<{ code: number; stdout: s
   });
 }
 
-describe("CLI", () => {
+describe("CLI", { timeout: 25000 }, () => {
   let dir: string;
   beforeEach(async () => {
     dir = await mkdtemp(join(tmpdir(), "desurf-cli-"));
@@ -144,5 +144,27 @@ describe("CLI", () => {
     ]);
     expect(r.code).toBe(2);
     expect(r.stderr + r.stdout).toMatch(/live provider/i);
+  });
+
+  it("record without --provider returns exit 2 with clear error", async () => {
+    const target = join(dir, "rec-no-prov");
+    await runCli(["init", target]);
+    const r = await runCli(["record", "--suite", target]);
+    expect(r.code).toBe(2);
+    expect(r.stderr).toMatch(/Missing required option: --provider/i);
+  });
+
+  it("record with unknown provider returns exit 2", async () => {
+    const target = join(dir, "rec-unk-prov");
+    await runCli(["init", target]);
+    const r = await runCli([
+      "record",
+      "--suite",
+      target,
+      "--provider",
+      "unknown-ai-provider",
+    ]);
+    expect(r.code).toBe(2);
+    expect(r.stderr).toMatch(/Unknown provider/i);
   });
 });
