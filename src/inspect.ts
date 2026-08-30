@@ -11,6 +11,8 @@ import {
   metaPathFor,
   readCassetteMeta,
   sha256,
+  sha256Normalized,
+  META_VERSION,
   type CassetteMeta,
   type CassetteStateLabel,
 } from "./fingerprint.js";
@@ -35,6 +37,12 @@ export type CaseInspectResult = {
   promptFresh: boolean | null;
   /** null when unsealed or invalid meta */
   inputFresh: boolean | null;
+  /**
+   * null when unsealed, invalid meta, or a v1 sidecar (the output was
+   * never fingerprinted, so freshness is unknowable — re-seal to
+   * upgrade). false = the saved output was modified after seal/record.
+   */
+  outputFresh: boolean | null;
   provenanceStatus: ProvenanceStatus;
   /** Human-readable detail when stale or invalid */
   detail?: string;
@@ -69,6 +77,7 @@ async function inspectOne(testCase: TestCase): Promise<CaseInspectResult> {
       metaPresent: true,
       promptFresh: null,
       inputFresh: null,
+      outputFresh: null,
       provenanceStatus: "invalid",
       detail: err instanceof Error ? err.message : String(err),
     };
@@ -81,6 +90,7 @@ async function inspectOne(testCase: TestCase): Promise<CaseInspectResult> {
       metaPresent: false,
       promptFresh: null,
       inputFresh: null,
+      outputFresh: null,
       provenanceStatus: "unsealed",
     };
   }
@@ -91,16 +101,32 @@ async function inspectOne(testCase: TestCase): Promise<CaseInspectResult> {
     readFile(testCase.prompt, "utf8"),
   ]);
 
-  const inputFresh = meta.inputSha256 === sha256(inputText);
-  const promptFresh = meta.promptSha256 === sha256(promptText);
+  // v1 sidecars hashed raw bytes (frozen legacy semantics); v2 hashes
+  // CRLF-normalized text so cross-platform line-ending drift is fresh.
+  const hash = meta.version >= META_VERSION ? sha256Normalized : sha256;
+  const inputFresh = meta.inputSha256 === hash(inputText);
+  const promptFresh = meta.promptSha256 === hash(promptText);
 
-  if (inputFresh && promptFresh) {
+  // v2 sidecars also authenticate the saved output itself.
+  let outputFresh: boolean | null = null;
+  if (meta.version >= META_VERSION) {
+    try {
+      const outputText = await readFile(testCase.outputPath, "utf8");
+      outputFresh = meta.outputSha256 === sha256Normalized(outputText);
+    } catch {
+      // Sealed output file missing/unreadable — report, don't crash.
+      outputFresh = false;
+    }
+  }
+
+  if (inputFresh && promptFresh && outputFresh !== false) {
     return {
       ...base,
       cassetteState,
       metaPresent: true,
       promptFresh,
       inputFresh,
+      outputFresh,
       provenanceStatus: "fresh",
     };
   }
@@ -108,6 +134,9 @@ async function inspectOne(testCase: TestCase): Promise<CaseInspectResult> {
   const parts: string[] = [];
   if (!promptFresh) parts.push("prompt does not match stored fingerprint");
   if (!inputFresh) parts.push("input does not match stored fingerprint");
+  if (outputFresh === false) {
+    parts.push("saved output does not match stored fingerprint (modified after seal/record)");
+  }
 
   return {
     ...base,
@@ -115,6 +144,7 @@ async function inspectOne(testCase: TestCase): Promise<CaseInspectResult> {
     metaPresent: true,
     promptFresh,
     inputFresh,
+    outputFresh,
     provenanceStatus: "stale",
     detail: parts.join("; "),
   };

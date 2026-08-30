@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
 import { evaluateAssertion } from "../src/assertions.js";
+import { RegexTimeoutError } from "../src/regex-sandbox.js";
 import { atomicWriteFile } from "../src/fs-utils.js";
 import { readFile } from "node:fs/promises";
 
@@ -53,34 +54,33 @@ describe("Hardening & Edge Cases (D-01, D-02, D-03)", { timeout: 35000 }, () => 
       expect(v2.stdout.trim()).toBe("0.4.0");
     });
 
-    it("`desurf test --suite <valid> -v` runs the test in verbose mode and does NOT just print version", async () => {
-      const r = await runCli(["test", "--suite", "fixtures/basic", "-v"]);
+    it("`desurf test --suite <valid> --verbose` runs the test in verbose mode and includes output", async () => {
+      const r = await runCli(["test", "--suite", "fixtures/basic", "--verbose"]);
       expect(r.code).toBe(0);
       expect(r.stdout).toMatch(/Desurf/);
       expect(r.stdout).toMatch(/PASS/);
       expect(r.stdout).toMatch(/Results: 1 passed/);
-      expect(r.stdout.trim()).not.toBe("0.4.0");
+      expect(r.stdout).toMatch(/output:/i);
     });
 
-    it("`desurf test --suite <failing> -v` runs the test, evaluates assertions, and exits 1 (never false-green 0)", async () => {
+    it("`desurf test --suite <valid> -v` rejects unknown option -v with exit 2", async () => {
+      const r = await runCli(["test", "--suite", "fixtures/basic", "-v"]);
+      expect(r.code).toBe(2);
+      expect(r.stderr).toMatch(/Unknown option: -v \(did you mean: desurf --version \?\)/);
+    });
+
+    it("`desurf test --suite <failing> --verbose` runs the test, evaluates assertions, and exits 1", async () => {
       const r = await runCli([
         "test",
         "--suite",
         "examples/support-agent",
         "--case",
         "support-classifier-regressed",
-        "-v",
+        "--verbose",
       ]);
       expect(r.code).toBe(1);
       expect(r.stdout).toMatch(/REGRESSION/);
       expect(r.stdout).toMatch(/Results: 0 passed, 0 flaky, 1 regression/);
-      expect(r.stdout.trim()).not.toBe("0.4.0");
-    });
-
-    it("`desurf test --suite <nonexistent> -v` reports error and exits 2", async () => {
-      const r = await runCli(["test", "--suite", join(dir, "nonexistent"), "-v"]);
-      expect(r.code).toBe(2);
-      expect(r.stdout.trim()).not.toBe("0.4.0");
     });
 
     it("`desurf test --suite <valid> --version` rejects unknown option --version with exit 2", async () => {
@@ -178,17 +178,26 @@ describe("Hardening & Edge Cases (D-01, D-02, D-03)", { timeout: 35000 }, () => 
     it("safely times out catastrophic backtracking regex without hanging", () => {
       const evilPattern = "(a+)+$";
       const adversarialText = "aaaaaaaaaaaaaaaaaaaaaaaaaaaa!"; // Would cause 2^28 operations
+      const origEnv = process.env.DESURF_REGEX_TIMEOUT_MS;
+      process.env.DESURF_REGEX_TIMEOUT_MS = "500";
 
-      const start = Date.now();
-      const result = evaluateAssertion(
-        { type: "regex", pattern: evilPattern },
-        { text: adversarialText }
-      );
-      const elapsed = Date.now() - start;
-
-      expect(result.passed).toBe(false);
-      expect(result.message).toMatch(/timed out/i);
-      expect(elapsed).toBeLessThan(3000);
+      try {
+        const start = Date.now();
+        expect(() => {
+          evaluateAssertion(
+            { type: "regex", pattern: evilPattern },
+            { text: adversarialText }
+          );
+        }).toThrow(RegexTimeoutError);
+        const elapsed = Date.now() - start;
+        expect(elapsed).toBeLessThan(3000);
+      } finally {
+        if (origEnv !== undefined) {
+          process.env.DESURF_REGEX_TIMEOUT_MS = origEnv;
+        } else {
+          delete process.env.DESURF_REGEX_TIMEOUT_MS;
+        }
+      }
     });
 
     it("evaluates standard valid regex correctly and quickly", () => {

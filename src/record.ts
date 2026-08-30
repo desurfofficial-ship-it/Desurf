@@ -67,11 +67,14 @@ async function recordOne(
     });
 
     await atomicWriteFile(testCase.outputPath, output.text, "utf8");
+    // output.text fingerprints the cassette itself (meta v2): post-record
+    // edits to the output file become detectable at test time.
     await writeCassetteMeta(
       testCase.outputPath,
       inputText,
       promptText,
       "record",
+      output.text,
       output.provider ?? providerName,
       output.model ?? model
     );

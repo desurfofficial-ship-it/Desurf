@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { classifyReliability, summarizeCase } from "../src/repeat.js";
+import {
+  classifyReliability,
+  summarizeCase,
+  validateRepeat,
+  MAX_REPEAT_OFFLINE,
+  MAX_REPEAT_LIVE,
+} from "../src/repeat.js";
 import type { TestResult } from "../src/types.js";
 
 function pass(id = "c1"): TestResult {
@@ -88,5 +94,21 @@ describe("summarizeCase", () => {
     expect(s.state).toBe("ERROR");
     expect(s.passCount).toBe(1);
     expect(s.errorCount).toBe(1);
+  });
+});
+
+describe("validateRepeat", () => {
+  it("accepts valid repeat within offline cap", () => {
+    expect(validateRepeat(1)).toBe(1);
+    expect(validateRepeat(10)).toBe(10);
+    expect(validateRepeat(MAX_REPEAT_OFFLINE)).toBe(MAX_REPEAT_OFFLINE);
+  });
+
+  it("rejects non-positive, non-integer, or over-cap repeat numbers", () => {
+    expect(() => validateRepeat(0)).toThrow(/positive integer/i);
+    expect(() => validateRepeat(-5)).toThrow(/positive integer/i);
+    expect(() => validateRepeat(1.5)).toThrow(/positive integer/i);
+    expect(() => validateRepeat(NaN)).toThrow(/positive integer/i);
+    expect(() => validateRepeat(MAX_REPEAT_OFFLINE + 1)).toThrow(/capped at 1000/i);
   });
 });

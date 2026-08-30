@@ -13,6 +13,8 @@ import { recordSuite } from "./record.js";
 import { runSuite } from "./runner.js";
 import { sealSuite } from "./seal.js";
 import { inspectSuite } from "./inspect.js";
+import { MAX_REPEAT_LIVE, validateRepeat } from "./repeat.js";
+import { SavedOutputAdapter } from "./provider.js";
 import type { InspectSummary } from "./inspect.js";
 import type { CaseReliability } from "./types.js";
 import type { RunSummary } from "./runner.js";
@@ -73,7 +75,7 @@ Usage:
 Options:
   --suite <path>       Path to suite directory (or suite.json) (required)
   --case <id>          Run only the named test case
-  --repeat <n>         Execute each case N times (default 1)
+  --repeat <n>         Execute each case N times (default 1; max 1000, or 100 with live providers)
   --provider <name>    offline (default) | openrouter | openai | anthropic | gemini
   --model <id>         Model id for live providers (uses provider default if omitted)
   --verbose            Extra diagnostic output (no secrets)
@@ -85,6 +87,11 @@ Environment (live providers only):
   OPENAI_API_KEY       API key for openai (never printed)
   ANTHROPIC_API_KEY    API key for anthropic (never printed)
   GEMINI_API_KEY       API key for gemini (or GOOGLE_API_KEY) (never printed)
+
+Regex safety:
+  DESURF_REGEX_TIMEOUT_MS   Hard deadline per regex assertion in ms (default 5000).
+                            Catastrophic backtracking is terminated and reported
+                            as ERROR (exit 2), never as REGRESSION.
 
 Exit codes:
   0  all tests PASS
@@ -162,7 +169,9 @@ Options:
 
 Notes:
   - Purely offline. No provider, model, API key, or network required.
-  - Hashes current input and prompt files and writes <outputPath>.desurf sidecar.
+  - Hashes current input, prompt, and output files and writes <outputPath>.desurf sidecar
+    (v2: fingerprints the output too, so post-seal edits to the cassette and
+    line-ending-only recheckouts are both detected correctly).
   - Requires non-empty output files on disk (missing/empty -> error).
   - Existing metadata files are skipped unless --force is set.
   - Prefer seal when you already have a trusted response; use record for live capture.
@@ -190,6 +199,7 @@ Reports for each case:
   - cassette state: UNSEALED | SEALED | RECORDED | INVALID
   - whether .desurf metadata exists
   - whether current prompt/input match stored fingerprints
+  - whether the saved output matches its sealed fingerprint (v2 sidecars)
   - overall provenance status: unsealed | fresh | stale | invalid
 
 Notes:
@@ -208,7 +218,6 @@ Exit codes:
 type ParsedArgs = {
   command: string;
   help?: boolean;
-  version?: boolean;
   suite?: string;
   caseId?: string;
   repeat?: number;
@@ -230,20 +239,24 @@ function parseArgs(argv: string[]): ParsedArgs {
     return result;
   }
 
-  const first = args[0];
-  if (first === "--version" || first === "-v") {
-    result.version = true;
+  // --version / -v are ONLY valid as the first argument (before any command).
+  // The previous full-argv scan made `desurf test --suite s --version` print
+  // the version and exit 0 WITHOUT running any test — a silent-green bypass
+  // of the entire CI gate. A version flag that appears after a command is now
+  // a hard configuration error (exit 2) instead of a gate no-op.
+  const firstArg = args[0];
+  if (firstArg === "--version" || firstArg === "-v") {
     result.command = "version";
     return result;
   }
 
-  if (first === "--help" || first === "-h") {
+  if (firstArg === "--help" || firstArg === "-h") {
     result.help = true;
     result.command = "help";
     return result;
   }
 
-  result.command = first;
+  result.command = firstArg;
   let i = 1;
 
   while (i < args.length) {
@@ -271,17 +284,17 @@ function parseArgs(argv: string[]): ParsedArgs {
       if (i + 1 >= args.length || args[i + 1].startsWith("-")) {
         throw new Error("Option --repeat requires a value");
       }
-      const rawVal = args[++i];
-      if (!/^\d+$/.test(rawVal)) {
-        throw new Error(`--repeat must be a positive decimal integer, got: ${rawVal}`);
+      const raw = args[++i];
+      // Strict decimal syntax. Number() would silently accept "0x10"
+      // (hex 16), "1e9" (scientific notation), and " 5 " (whitespace) —
+      // surprising coercions for a count that bounds CI runtime and cost.
+      if (!/^\d+$/.test(raw)) {
+        throw new Error(
+          `--repeat must be a positive decimal integer (digits 0-9 only), got: ${raw}`
+        );
       }
-      const n = Number(rawVal);
-      if (!Number.isInteger(n) || n < 1) {
-        throw new Error(`--repeat must be a positive decimal integer, got: ${rawVal}`);
-      }
-      if (n > 1000) {
-        throw new Error(`--repeat exceeds maximum allowed value (1000), got: ${rawVal}`);
-      }
+      const n = Number(raw);
+      validateRepeat(n);
       result.repeat = n;
       i++;
     } else if (a === "--provider") {
@@ -299,16 +312,16 @@ function parseArgs(argv: string[]): ParsedArgs {
     } else if (a === "--force") {
       result.force = true;
       i++;
-    } else if (a === "--verbose" || a === "-v") {
-      if (first === "test") {
-        result.verbose = true;
-      } else {
-        throw new Error(`Unknown option: ${a}`);
-      }
+    } else if (a === "--verbose") {
+      result.verbose = true;
       i++;
     } else if (a === "--json") {
       result.json = true;
       i++;
+    } else if (a === "--version" || a === "-v") {
+      throw new Error(
+        `Unknown option: ${a} (did you mean: desurf --version ?)`
+      );
     } else if (a.startsWith("-")) {
       throw new Error(`Unknown option: ${a}`);
     } else {
@@ -426,6 +439,22 @@ async function cmdTest(parsed: ParsedArgs): Promise<number> {
     });
   } catch (err) {
     console.error(err instanceof Error ? err.message : String(err));
+    return 2;
+  }
+
+  // Live providers are billed per call: each repetition of each case is a
+  // network request. Cap repetitions far below the offline ceiling so a
+  // typo (--repeat 1000) cannot silently become a four-figure API bill.
+  if (
+    parsed.repeat !== undefined &&
+    parsed.repeat > MAX_REPEAT_LIVE &&
+    !(provider instanceof SavedOutputAdapter)
+  ) {
+    console.error(
+      `--repeat is capped at ${MAX_REPEAT_LIVE} with live providers (got: ${parsed.repeat}). ` +
+        `Each repetition is a billed network call — use the offline provider ` +
+        `for high-repetition reliability sampling.`
+    );
     return 2;
   }
 
@@ -639,6 +668,14 @@ async function cmdInspect(parsed: ParsedArgs): Promise<number> {
     let anyInvalid = false;
     for (const c of summary.cases) {
       const state = c.cassetteState.toUpperCase();
+      // v1 sidecars never fingerprinted the output — say so instead of
+      // implying it was verified.
+      const savedLine =
+        c.outputFresh === null
+          ? "unverified (v1 sidecar — re-seal to fingerprint the output)"
+          : c.outputFresh
+            ? "fresh"
+            : "STALE (modified after seal/record)";
       console.log(`• ${c.caseId}`);
       console.log(`  cassette: ${state}`);
       console.log(`  output:   ${c.outputPath}`);
@@ -649,12 +686,14 @@ async function cmdInspect(parsed: ParsedArgs): Promise<number> {
       } else if (c.provenanceStatus === "fresh") {
         console.log(`  prompt:   fresh`);
         console.log(`  input:    fresh`);
-        console.log(`  status:   FRESH — fingerprints match current prompt and input`);
+        console.log(`  saved:    ${savedLine}`);
+        console.log(`  status:   FRESH — fingerprints match current prompt and input${c.outputFresh === null ? "" : " and output"}`);
       } else if (c.provenanceStatus === "stale") {
         console.log(`  prompt:   ${c.promptFresh ? "fresh" : "STALE"}`);
         console.log(`  input:    ${c.inputFresh ? "fresh" : "STALE"}`);
+        if (c.outputFresh !== null) console.log(`  saved:    ${savedLine}`);
         console.log(`  status:   STALE — ${c.detail ?? "fingerprints do not match"}`);
-        console.log(`  next:     restore input/prompt or re-seal / re-record`);
+        console.log(`  next:     restore input/prompt/output or re-seal / re-record`);
       } else {
         anyInvalid = true;
         console.log(`  status:   INVALID — ${c.detail ?? "malformed provenance metadata"}`);
@@ -685,6 +724,7 @@ function inspectToJson(summary: InspectSummary): object {
       metaPresent: c.metaPresent,
       promptFresh: c.promptFresh,
       inputFresh: c.inputFresh,
+      outputFresh: c.outputFresh,
       provenanceStatus: c.provenanceStatus,
       detail: c.detail ?? null,
     })),

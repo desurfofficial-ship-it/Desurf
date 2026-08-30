@@ -6,9 +6,9 @@
 import { readFile } from "node:fs/promises";
 import { evaluateTestCase } from "./engine.js";
 import { loadSuite } from "./offline.js";
-import { assertCassetteFresh, readCassetteState } from "./fingerprint.js";
+import { assertCassetteFresh, readCassetteState, verifyCassetteOutput } from "./fingerprint.js";
 import { SavedOutputAdapter } from "./provider.js";
-import { summarizeCase } from "./repeat.js";
+import { summarizeCase, validateRepeat } from "./repeat.js";
 import type {
   CaseReliability,
   ModelAdapter,
@@ -56,6 +56,13 @@ async function runOneExecution(
       outputPath: testCase.outputPath,
     });
 
+    // Authenticate the cassette itself (v2 sidecars): without this, an
+    // output file edited after sealing would be evaluated as if it were
+    // the sealed bytes, with provenance still reporting "fresh".
+    if (provider instanceof SavedOutputAdapter) {
+      await verifyCassetteOutput(testCase.outputPath, output.text);
+    }
+
     return evaluateTestCase(testCase, output);
   } catch (err) {
     return {
@@ -70,7 +77,11 @@ async function runOneExecution(
 export async function runSuite(options: RunOptions): Promise<RunSummary> {
   const suite: Suite = await loadSuite(options.suitePath);
   const provider = options.provider ?? new SavedOutputAdapter();
-  const repeat = Math.max(1, options.repeat ?? 1);
+  // Enforce the same ceiling as the CLI for library callers: a repeat
+  // count that is not a positive integer within the cap is a programming
+  // error and must fail loudly, not silently pin the CPU for a week.
+  // (Previously `Math.max(1, repeat)` quietly turned 0/-7/NaN into 1.)
+  const repeat = validateRepeat(options.repeat ?? 1);
 
   let cases = suite.cases;
   if (options.caseId) {

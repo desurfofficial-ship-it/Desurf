@@ -70,12 +70,21 @@ async function sealOne(
       };
     }
 
-    const [inputText, promptText] = await Promise.all([
+    const [inputText, promptText, outputText] = await Promise.all([
       readFile(testCase.input, "utf8"),
       readFile(testCase.prompt, "utf8"),
+      readFile(testCase.outputPath, "utf8"),
     ]);
 
-    await writeCassetteMeta(testCase.outputPath, inputText, promptText, "seal");
+    // outputText fingerprints the cassette itself (meta v2): post-seal
+    // edits to the output file become detectable at test time.
+    await writeCassetteMeta(
+      testCase.outputPath,
+      inputText,
+      promptText,
+      "seal",
+      outputText
+    );
 
     return {
       caseId: testCase.id,

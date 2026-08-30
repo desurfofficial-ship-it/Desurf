@@ -46,6 +46,18 @@ describe("CLI", { timeout: 25000 }, () => {
     expect(r.stdout.trim()).toBe("0.4.0");
   });
 
+  it("--version after command exits 2 with clear error message", async () => {
+    const r = await runCli(["test", "--suite", "fixtures/basic", "--version"]);
+    expect(r.code).toBe(2);
+    expect(r.stderr).toMatch(/Unknown option: --version \(did you mean: desurf --version \?\)/);
+  });
+
+  it("-v after command exits 2 with clear error message", async () => {
+    const r = await runCli(["test", "--suite", "fixtures/basic", "-v"]);
+    expect(r.code).toBe(2);
+    expect(r.stderr).toMatch(/Unknown option: -v \(did you mean: desurf --version \?\)/);
+  });
+
   it("--help exits 0", async () => {
     const r = await runCli(["--help"]);
     expect(r.code).toBe(0);

@@ -13,7 +13,10 @@ import { createHash } from "node:crypto";
 import { access, constants, readFile } from "node:fs/promises";
 import { atomicWriteFile } from "./fs-utils.js";
 
-export const META_VERSION = 1;
+export const META_VERSION = 2;
+
+/** Legacy sidecar version: input/prompt only, byte-exact hashes. */
+export const LEGACY_META_VERSION = 1;
 
 export type CassetteSource = "seal" | "record";
 
@@ -21,6 +24,12 @@ export type CassetteMeta = {
   version: number;
   inputSha256: string;
   promptSha256: string;
+  /**
+   * v2 only: fingerprint of the sealed output text. Detects a cassette
+   * edited after seal/record — without it, assertions evaluate against
+   * whatever bytes are on disk and provenance stays nominally "fresh".
+   */
+  outputSha256?: string;
   /**
    * Origin of the sidecar. Optional for v0.3.0 legacy sidecars.
    * - "seal"   → written by `desurf seal`
@@ -35,8 +44,21 @@ export type CassetteMeta = {
 };
 
 export function sha256(text: string): string {
-  const normalized = text.replace(/\r\n/g, "\n");
-  return createHash("sha256").update(normalized, "utf8").digest("hex");
+  return createHash("sha256").update(text, "utf8").digest("hex");
+}
+
+/**
+ * sha256 over CRLF→LF-normalized text.
+ *
+ * v1 hashed raw bytes: the identical suite checked out with git autocrlf
+ * on Windows hashed differently than on Linux, so every cross-platform
+ * re-checkout reported STALE (false alarm — no one changed anything).
+ * v2 hashes normalized text, so a fixture is fresh on any platform as
+ * long as only line endings differ. Real content changes still change
+ * the hash.
+ */
+export function sha256Normalized(text: string): string {
+  return sha256(text.replace(/\r\n/g, "\n"));
 }
 
 /** Sidecar path for a cassette: `<outputPath>.desurf` */
@@ -44,17 +66,47 @@ export function metaPathFor(outputPath: string): string {
   return `${outputPath}.desurf`;
 }
 
+/**
+ * Build cassette provenance metadata.
+ *
+ * - Without `outputText` (legacy call shape): writes a v1 sidecar with
+ *   byte-exact input/prompt hashes, exactly like previous releases.
+ * - With `outputText` (all built-in commands): writes a v2 sidecar with
+ *   EOL-normalized hashes plus outputSha256, enabling tamper detection
+ *   and cross-platform line-ending tolerance.
+ */
 export function buildMeta(
   inputText: string,
   promptText: string,
   source?: CassetteSource,
+  outputText?: string,
   provider?: string,
   model?: string
 ): CassetteMeta {
+  if (outputText === undefined) {
+    // Legacy v1 builder: frozen semantics, byte-exact hashes.
+    const legacy: CassetteMeta = {
+      version: LEGACY_META_VERSION,
+      inputSha256: sha256(inputText),
+      promptSha256: sha256(promptText),
+    };
+    if (source) {
+      legacy.source = source;
+    }
+    if (provider) {
+      legacy.provider = provider;
+    }
+    if (model) {
+      legacy.model = model;
+    }
+    return legacy;
+  }
+
   const meta: CassetteMeta = {
     version: META_VERSION,
-    inputSha256: sha256(inputText),
-    promptSha256: sha256(promptText),
+    inputSha256: sha256Normalized(inputText),
+    promptSha256: sha256Normalized(promptText),
+    outputSha256: sha256Normalized(outputText),
   };
   if (source) {
     meta.source = source;
@@ -73,10 +125,11 @@ export async function writeCassetteMeta(
   inputText: string,
   promptText: string,
   source?: CassetteSource,
+  outputText?: string,
   provider?: string,
   model?: string
 ): Promise<void> {
-  const meta = buildMeta(inputText, promptText, source, provider, model);
+  const meta = buildMeta(inputText, promptText, source, outputText, provider, model);
   await atomicWriteFile(
     metaPathFor(outputPath),
     JSON.stringify(meta, null, 2) + "\n",
@@ -110,12 +163,13 @@ export function cassetteStateFromMeta(
   return "sealed";
 }
 
-const HEX_SHA256_RE = /^[a-f0-9]{64}$/i;
+const HEX64 = /^[0-9a-f]{64}$/;
 
 /**
  * Read and validate a sidecar if present.
  * Returns null when missing.
- * Throws on corrupt JSON or missing required hash fields.
+ * Throws on corrupt JSON, unknown version, malformed hash values, or a
+ * v2 sidecar missing its output fingerprint.
  */
 export async function readCassetteMeta(
   outputPath: string
@@ -142,21 +196,37 @@ export async function readCassetteMeta(
 
   const meta = raw as CassetteMeta;
 
-  if (meta.version !== META_VERSION) {
+  // Version must be a known integer. Previously ANY version value was
+  // accepted and silently trusted (a "version": 99 sidecar with nonsense
+  // hashes half-validated), so hand-edited or corrupt sidecars produced
+  // divergent verdicts between test and inspect instead of a hard error.
+  if (
+    typeof meta.version !== "number" ||
+    !Number.isInteger(meta.version) ||
+    (meta.version !== LEGACY_META_VERSION && meta.version !== META_VERSION)
+  ) {
     throw new Error(
-      `Invalid cassette meta file (unsupported version ${String(meta.version)}): ${metaFile}`
+      `Invalid cassette meta file (unsupported version ${JSON.stringify(
+        (raw as { version?: unknown }).version
+      )}; this desurf reads versions 1 and 2): ${metaFile}`
     );
   }
 
-  if (
-    typeof meta.inputSha256 !== "string" ||
-    !HEX_SHA256_RE.test(meta.inputSha256) ||
-    typeof meta.promptSha256 !== "string" ||
-    !HEX_SHA256_RE.test(meta.promptSha256)
-  ) {
+  // Hash fields must be real sha256 digests (64 lowercase hex chars).
+  // Anything else means the sidecar was hand-edited or corrupted; letting
+  // it through turns provenance into a string comparison with garbage.
+  if (!HEX64.test(meta.inputSha256) || !HEX64.test(meta.promptSha256)) {
     throw new Error(
-      `Invalid cassette meta file (inputSha256 and promptSha256 must be 64-char hex SHA-256 hashes): ${metaFile}`
+      `Invalid cassette meta file (inputSha256/promptSha256 must be 64-character lowercase hex sha256 values): ${metaFile}`
     );
+  }
+
+  if (meta.version === META_VERSION) {
+    if (typeof meta.outputSha256 !== "string" || !HEX64.test(meta.outputSha256)) {
+      throw new Error(
+        `Invalid cassette meta file (version 2 requires a 64-character lowercase hex outputSha256): ${metaFile}`
+      );
+    }
   }
 
   if (
@@ -190,6 +260,9 @@ export async function readCassetteState(
  * If a meta sidecar exists, verify current input/prompt match the recorded hashes.
  * Throws with a clear message on mismatch (caller maps this to ERROR / exit 2).
  * Missing sidecar → no-op (legacy fixture).
+ *
+ * Hash mode follows the sidecar version: v1 compares byte-exact (frozen
+ * legacy semantics), v2 compares CRLF-normalized (autocrlf tolerance).
  */
 export async function assertCassetteFresh(
   outputPath: string,
@@ -201,8 +274,9 @@ export async function assertCassetteFresh(
     return;
   }
 
-  const inputHash = sha256(inputText);
-  const promptHash = sha256(promptText);
+  const hash = meta.version >= META_VERSION ? sha256Normalized : sha256;
+  const inputHash = hash(inputText);
+  const promptHash = hash(promptText);
 
   const inputStale = meta.inputSha256 !== inputHash;
   const promptStale = meta.promptSha256 !== promptHash;
@@ -224,4 +298,30 @@ export async function assertCassetteFresh(
       "or restore the previous input/prompt."
   );
   throw new Error(parts.join(" "));
+}
+
+/**
+ * Verify (v2 sidecars only) that the saved output still matches the
+ * fingerprint recorded at seal/record time. Without this check the
+ * cassette itself was never authenticated: anyone could edit the output
+ * file to make assertions pass and provenance still said "fresh".
+ * v1 sidecars cannot verify this (no outputSha256) and are skipped —
+ * re-seal to upgrade. Missing sidecar → no-op (legacy fixture).
+ */
+export async function verifyCassetteOutput(
+  outputPath: string,
+  outputText: string
+): Promise<void> {
+  const meta = await readCassetteMeta(outputPath);
+  if (!meta || meta.version < META_VERSION || meta.outputSha256 === undefined) {
+    return;
+  }
+  if (meta.outputSha256 !== sha256Normalized(outputText)) {
+    throw new Error(
+      `Saved output was modified after sealing (outputSha256 mismatch): ${outputPath}. ` +
+        `The assertions would run against bytes that no longer match the sealed cassette. ` +
+        `Restore the original output, or if the change is intentional refresh provenance ` +
+        `with \`desurf seal --force\` (keep edited output) or \`desurf record --force\` (new provider output).`
+    );
+  }
 }

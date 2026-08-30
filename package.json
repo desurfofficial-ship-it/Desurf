@@ -20,6 +20,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
+    "lint": "tsc --noEmit",
     "desurf": "tsx src/cli.ts",
     "test:offline": "tsx src/cli.ts test --suite fixtures/basic --repeat 3",
     "test:ci": "node dist/cli.js test --suite fixtures/basic",

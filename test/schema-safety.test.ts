@@ -56,4 +56,54 @@ describe("assertion schema safety", () => {
       parseAssertion({ type: "contains", value: "x" } as never)
     ).toThrow(/Unknown assertion type/i);
   });
+
+  it("rejects empty string value on required assertion", () => {
+    expect(() =>
+      parseAssertion({ type: "required", value: "" })
+    ).toThrow(/non-empty "value"/i);
+  });
+
+  it("rejects empty string value on forbidden assertion", () => {
+    expect(() =>
+      parseAssertion({ type: "forbidden", value: "" })
+    ).toThrow(/non-empty "value"/i);
+  });
+
+  it("rejects invalid regex pattern at parse time", () => {
+    expect(() =>
+      parseAssertion({ type: "regex", pattern: "([" })
+    ).toThrow(/invalid \/\(\[\//i);
+  });
+
+  it("rejects unsupported json_schema type", () => {
+    expect(() =>
+      parseAssertion({
+        type: "json_schema",
+        schema: { type: "string" },
+      })
+    ).toThrow(/unsupported type "string"/i);
+  });
+
+  it("rejects non-array required in json_schema", () => {
+    expect(() =>
+      parseAssertion({
+        type: "json_schema",
+        schema: { type: "object", required: "category" as never },
+      })
+    ).toThrow(/"required" must be an array of strings/i);
+  });
+
+  it("rejects object const in json_schema properties", () => {
+    expect(() =>
+      parseAssertion({
+        type: "json_schema",
+        schema: {
+          type: "object",
+          properties: {
+            details: { const: { foo: "bar" } },
+          },
+        },
+      })
+    ).toThrow(/const must be a primitive/i);
+  });
 });

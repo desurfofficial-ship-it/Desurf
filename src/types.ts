@@ -15,7 +15,7 @@ export type TestCase = {
   id: string;
   input: string;
   prompt: string;
-  /** Path relative to the suite directory, or absolute. */
+  /** Path relative to the suite directory; must resolve inside it (loader rejects absolute paths and `..` escapes). */
   outputPath: string;
   assertions: Assertion[];
 };

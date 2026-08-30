@@ -3,8 +3,17 @@
  * Pure functions — no I/O, no CLI, no provider knowledge.
  */
 
-import vm from "node:vm";
 import type { Assertion, AssertionResult, ModelOutput } from "./types.js";
+import {
+  RegexSandbox,
+  RegexTimeoutError,
+  regexTimeoutMs,
+} from "./regex-sandbox.js";
+
+// Module-level singleton: one persistent evaluation worker for the whole
+// run (lazily spawned, reused across cases/repeats, terminated only when a
+// regex wedges past its deadline).
+const regexSandbox = new RegexSandbox();
 
 function includesWithCase(
   haystack: string,
@@ -52,68 +61,40 @@ function evaluateRegex(
   pattern: string,
   flags?: string
 ): AssertionResult {
+  let passed: boolean;
   try {
-    const re = new RegExp(pattern, flags ?? "");
-    let passed = false;
-    try {
-      const script = new vm.Script("re.test(text)");
-      const context = vm.createContext({ re, text: output.text });
-      passed = Boolean(script.runInContext(context, { timeout: 1000 }));
-    } catch (vmErr: any) {
-      if (
-        vmErr &&
-        (vmErr.code === "ERR_SCRIPT_EXECUTION_TIMEOUT" ||
-          String(vmErr.message).includes("timed out"))
-      ) {
-        return {
-          assertion: { type: "regex", pattern, flags },
-          passed: false,
-          message: `Regex evaluation timed out (potential ReDoS): /${pattern}/${flags ?? ""}`,
-        };
-      }
-      passed = re.test(output.text);
-    }
-    return {
-      assertion: { type: "regex", pattern, flags },
-      passed,
-      message: passed
-        ? `Regex matched: /${pattern}/${flags ?? ""}`
-        : `Regex did not match: /${pattern}/${flags ?? ""}`,
-    };
+    passed = regexSandbox.test(
+      pattern,
+      flags ?? "",
+      output.text,
+      regexTimeoutMs()
+    );
   } catch (err) {
+    if (err instanceof RegexTimeoutError) {
+      // Evaluation hazard, not a behavioral result: propagate so the runner
+      // records this execution as ERROR (exit 2) instead of misclassifying a
+      // resource explosion as REGRESSION (exit 1).
+      throw err;
+    }
+    // Uncompilable pattern: preserve the historical failed-result contract
+    // of the direct evaluator API (suite loading already rejects these at
+    // config time with a precise message).
+    const message = err instanceof Error ? err.message : String(err);
     return {
       assertion: { type: "regex", pattern, flags },
       passed: false,
-      message: `Invalid regex: ${err instanceof Error ? err.message : String(err)}`,
+      message: message.startsWith("Invalid regex:")
+        ? message
+        : `Invalid regex: ${message}`,
     };
   }
-}
-
-function deepEqual(a: unknown, b: unknown): boolean {
-  if (a === b) return true;
-  if (a === null || typeof a !== "object" || b === null || typeof b !== "object") {
-    return false;
-  }
-  if (Array.isArray(a) !== Array.isArray(b)) return false;
-  if (Array.isArray(a) && Array.isArray(b)) {
-    if (a.length !== b.length) return false;
-    for (let i = 0; i < a.length; i++) {
-      if (!deepEqual(a[i], b[i])) return false;
-    }
-    return true;
-  }
-  const keysA = Object.keys(a as object);
-  const keysB = Object.keys(b as object);
-  if (keysA.length !== keysB.length) return false;
-  for (const k of keysA) {
-    if (!Object.prototype.hasOwnProperty.call(b, k)) return false;
-    if (!deepEqual((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k])) return false;
-  }
-  return true;
-}
-
-function hasOwnProperty(obj: unknown, key: string): boolean {
-  return typeof obj === "object" && obj !== null && Object.prototype.hasOwnProperty.call(obj, key);
+  return {
+    assertion: { type: "regex", pattern, flags },
+    passed,
+    message: passed
+      ? `Regex matched: /${pattern}/${flags ?? ""}`
+      : `Regex did not match: /${pattern}/${flags ?? ""}`,
+  };
 }
 
 /**
@@ -152,7 +133,9 @@ function evaluateJsonSchema(
     const obj = parsed as Record<string, unknown>;
     for (const key of schema.required) {
       if (typeof key !== "string") continue;
-      if (!hasOwnProperty(obj, key)) {
+      // Object.hasOwn: `key in obj` hits the prototype chain, so inherited keys
+      // like "constructor"/"__proto__" falsely satisfied required-key checks.
+      if (!Object.hasOwn(obj, key)) {
         return {
           assertion: { type: "json_schema", schema },
           passed: false,
@@ -180,19 +163,11 @@ function evaluateJsonSchema(
       const ps = propSchema as Record<string, unknown>;
 
       if ("const" in ps) {
-        if (!hasOwnProperty(obj, propName)) {
+        if (!Object.hasOwn(obj, propName) || obj[propName] !== ps.const) {
           return {
             assertion: { type: "json_schema", schema },
             passed: false,
-            message: `Property "${propName}" expected const ${JSON.stringify(ps.const)}, got undefined`,
-          };
-        }
-        const val = obj[propName];
-        if (!deepEqual(val, ps.const)) {
-          return {
-            assertion: { type: "json_schema", schema },
-            passed: false,
-            message: `Property "${propName}" expected const ${JSON.stringify(ps.const)}, got ${JSON.stringify(val)}`,
+            message: `Property "${propName}" expected const ${JSON.stringify(ps.const)}, got ${JSON.stringify(obj[propName])}`,
           };
         }
       }
@@ -205,20 +180,11 @@ function evaluateJsonSchema(
             message: `Property "${propName}" has invalid enum (must be an array)`,
           };
         }
-        if (!hasOwnProperty(obj, propName)) {
+        if (!Object.hasOwn(obj, propName) || !ps.enum.includes(obj[propName])) {
           return {
             assertion: { type: "json_schema", schema },
             passed: false,
-            message: `Missing property "${propName}" with value in enum ${JSON.stringify(ps.enum)}`,
-          };
-        }
-        const val = obj[propName];
-        const match = ps.enum.some((item) => deepEqual(item, val));
-        if (!match) {
-          return {
-            assertion: { type: "json_schema", schema },
-            passed: false,
-            message: `Property "${propName}" value ${JSON.stringify(val)} not in enum ${JSON.stringify(ps.enum)}`,
+            message: `Property "${propName}" value ${JSON.stringify(obj[propName])} not in enum ${JSON.stringify(ps.enum)}`,
           };
         }
       }

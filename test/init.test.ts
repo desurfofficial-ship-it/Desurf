@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { initSuite } from "../src/init.js";
 import { loadSuite } from "../src/offline.js";
 import { runSuite } from "../src/runner.js";
+import { sealSuite } from "../src/seal.js";
 import { SavedOutputAdapter } from "../src/provider.js";
 
 describe("desurf init", () => {
@@ -47,7 +48,7 @@ describe("desurf init", () => {
     expect(summary.errors).toBe(0);
   });
 
-  it("violating the saved output produces REGRESSION", async () => {
+  it("violating the saved output is tamper (ERROR) until re-sealed, then REGRESSION", async () => {
     const target = join(dir, "regress-suite");
     await initSuite(target);
 
@@ -65,12 +66,31 @@ describe("desurf init", () => {
       "utf8"
     );
 
+    // v2 sidecars fingerprint the output: editing the sealed cassette is
+    // provenance tampering — classified ERROR, not silently evaluated as
+    // if it were the recorded behavior (which could never distinguish a
+    // hand-edited file from a real model regression).
+    const tampered = await runSuite({
+      suitePath: target,
+      provider: new SavedOutputAdapter(),
+    });
+    expect(tampered.passed).toBe(0);
+    expect(tampered.errors).toBe(1);
+    expect(tampered.regression).toBe(0);
+    const err = tampered.cases[0].executions[0].error ?? "";
+    expect(err).toMatch(/modified after sealing/i);
+
+    // Re-sealing the edited output is the explicit "this is the new
+    // baseline" action. The same bytes then evaluate normally and the
+    // contract failure classifies as REGRESSION, as before.
+    await sealSuite({ suitePath: target, force: true });
     const summary = await runSuite({
       suitePath: target,
       provider: new SavedOutputAdapter(),
     });
     expect(summary.passed).toBe(0);
     expect(summary.regression).toBe(1);
+    expect(summary.errors).toBe(0);
   });
 
   it("refuses overwrite", async () => {

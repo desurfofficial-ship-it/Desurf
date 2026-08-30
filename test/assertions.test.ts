@@ -230,4 +230,49 @@ describe("json_schema const and enum", () => {
     expect(r.passed).toBe(false);
     expect(r.message).toMatch(/enum/i);
   });
+
+  it("required does not match inherited prototype keys (constructor, __proto__)", () => {
+    const r = evaluateAssertion(
+      {
+        type: "json_schema",
+        schema: {
+          type: "object",
+          required: ["constructor", "__proto__"],
+        },
+      },
+      billing
+    );
+    expect(r.passed).toBe(false);
+    expect(r.message).toMatch(/Missing required key/i);
+  });
+
+  it("const/enum does not match inherited prototype keys", () => {
+    const rConst = evaluateAssertion(
+      {
+        type: "json_schema",
+        schema: {
+          type: "object",
+          properties: {
+            constructor: { const: "Object" },
+          },
+        },
+      },
+      billing
+    );
+    expect(rConst.passed).toBe(false);
+
+    const rEnum = evaluateAssertion(
+      {
+        type: "json_schema",
+        schema: {
+          type: "object",
+          properties: {
+            toString: { enum: ["function"] },
+          },
+        },
+      },
+      billing
+    );
+    expect(rEnum.passed).toBe(false);
+  });
 });

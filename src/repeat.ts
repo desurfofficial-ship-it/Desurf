@@ -8,6 +8,37 @@
 import type { CaseReliability, ReliabilityState, TestResult } from "./types.js";
 
 /**
+ * Hard ceilings for --repeat.
+ *
+ * There was previously no upper bound, and Number() silently accepts
+ * "0x10" (hex 16) and "1e9" (1,000,000,000): `desurf test --repeat 1e9`
+ * parked the CI gate effectively forever offline, or with a live provider
+ * billed a billion network calls. The CLI enforces decimal syntax; both
+ * the CLI and runSuite() enforce these numeric ceilings, so library
+ * callers get the same guarantee as the flag parser.
+ */
+
+/** Max repetitions per case for offline evaluation (bounded local work). */
+export const MAX_REPEAT_OFFLINE = 1000;
+
+/** Max repetitions per case when the provider is live (network + money). */
+export const MAX_REPEAT_LIVE = 100;
+
+/** Validate a repeat count supplied by any caller (CLI flag or runSuite). */
+export function validateRepeat(n: number): number {
+  if (!Number.isInteger(n) || n < 1) {
+    throw new Error(`--repeat must be a positive integer, got: ${n}`);
+  }
+  if (n > MAX_REPEAT_OFFLINE) {
+    throw new Error(
+      `--repeat is capped at ${MAX_REPEAT_OFFLINE} (got: ${n}). ` +
+        `Wrap desurf in a script loop if you truly need more repetitions per run.`
+    );
+  }
+  return n;
+}
+
+/**
  * Classify a sequence of execution results for one case.
  *
  * Rules (from blueprint):

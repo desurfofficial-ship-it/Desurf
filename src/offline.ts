@@ -5,7 +5,7 @@
  */
 
 import { readFile, stat } from "node:fs/promises";
-import { resolve, dirname, isAbsolute } from "node:path";
+import { resolve, dirname, isAbsolute, relative, sep } from "node:path";
 import type { Assertion, Suite, TestCase } from "./types.js";
 
 type RawAssertion = {
@@ -52,6 +52,67 @@ function assertNoUnknownFields(raw: RawAssertion): void {
   }
 }
 
+/**
+ * Validate the supported json_schema subset at load time so unsupported or
+ * malformed schema fragments fail fast (exit 2) instead of silently becoming
+ * no-op assertions that pass anything (silent-green).
+ */
+function validateJsonSchemaShape(schema: Record<string, unknown>): void {
+  if (schema.type !== undefined && schema.type !== "object") {
+    throw new Error(
+      `json_schema: unsupported type "${String(schema.type)}" (only "object" is supported)`
+    );
+  }
+  if (schema.required !== undefined) {
+    if (!Array.isArray(schema.required)) {
+      throw new Error(
+        `json_schema: "required" must be an array of strings (got ${typeof schema.required})`
+      );
+    }
+    for (const key of schema.required) {
+      if (typeof key !== "string") {
+        throw new Error(
+          `json_schema: "required" entries must be strings (got ${typeof key})`
+        );
+      }
+    }
+  }
+  if (schema.properties !== undefined) {
+    if (
+      typeof schema.properties !== "object" ||
+      schema.properties === null ||
+      Array.isArray(schema.properties)
+    ) {
+      throw new Error(`json_schema: "properties" must be an object`);
+    }
+    for (const [propName, propSchema] of Object.entries(schema.properties)) {
+      if (!propSchema || typeof propSchema !== "object" || Array.isArray(propSchema)) {
+        throw new Error(
+          `json_schema: property "${propName}" must be an object`
+        );
+      }
+      const ps = propSchema as Record<string, unknown>;
+      if ("const" in ps && (typeof ps.const === "object" || ps.const === null)) {
+        throw new Error(
+          `json_schema: property "${propName}" const must be a primitive (objects/arrays compare by reference and can never match parsed JSON)`
+        );
+      }
+      if ("enum" in ps) {
+        if (!Array.isArray(ps.enum)) {
+          throw new Error(
+            `json_schema: property "${propName}" enum must be an array`
+          );
+        }
+        if (ps.enum.some((v) => typeof v === "object" && v !== null)) {
+          throw new Error(
+            `json_schema: property "${propName}" enum entries must be primitives (objects/arrays compare by reference)`
+          );
+        }
+      }
+    }
+  }
+}
+
 export function parseAssertion(raw: RawAssertion): Assertion {
   if (!raw || typeof raw !== "object" || typeof raw.type !== "string") {
     throw new Error(`Assertion must be an object with a string "type"`);
@@ -61,8 +122,13 @@ export function parseAssertion(raw: RawAssertion): Assertion {
 
   switch (raw.type) {
     case "required":
-      if (typeof raw.value !== "string" || raw.value === "") {
-        throw new Error(`required assertion needs a non-empty string "value"`);
+      if (typeof raw.value !== "string") {
+        throw new Error(`required assertion needs a string "value"`);
+      }
+      if (raw.value.length === 0) {
+        throw new Error(
+          `required assertion needs a non-empty "value" (an empty string matches every output — vacuously green)`
+        );
       }
       if (
         raw.caseSensitive !== undefined &&
@@ -76,8 +142,13 @@ export function parseAssertion(raw: RawAssertion): Assertion {
         caseSensitive: raw.caseSensitive,
       };
     case "forbidden":
-      if (typeof raw.value !== "string" || raw.value === "") {
-        throw new Error(`forbidden assertion needs a non-empty string "value"`);
+      if (typeof raw.value !== "string") {
+        throw new Error(`forbidden assertion needs a string "value"`);
+      }
+      if (raw.value.length === 0) {
+        throw new Error(
+          `forbidden assertion needs a non-empty "value" (an empty string is contained in every output — can never pass)`
+        );
       }
       if (
         raw.caseSensitive !== undefined &&
@@ -99,11 +170,17 @@ export function parseAssertion(raw: RawAssertion): Assertion {
       if (raw.flags !== undefined && typeof raw.flags !== "string") {
         throw new Error(`regex assertion "flags" must be a string`);
       }
+      // Compile NOW: an invalid pattern/flags combination is a configuration
+      // error and must fail the run with exit 2 before anything executes.
+      // Previously it surfaced per-execution as REGRESSION (exit 1), misclassifying
+      // broken config as a model behavior change.
       try {
         new RegExp(raw.pattern, raw.flags ?? "");
       } catch (err) {
         throw new Error(
-          `Invalid regex pattern /${raw.pattern}/${raw.flags ?? ""}: ${err instanceof Error ? err.message : String(err)}`
+          `regex assertion has an invalid /${raw.pattern}/${raw.flags ?? ""}: ${
+            err instanceof Error ? err.message : String(err)
+          }`
         );
       }
       return { type: "regex", pattern: raw.pattern, flags: raw.flags };
@@ -111,36 +188,50 @@ export function parseAssertion(raw: RawAssertion): Assertion {
       if (!raw.schema || typeof raw.schema !== "object" || Array.isArray(raw.schema)) {
         throw new Error(`json_schema assertion needs an object "schema"`);
       }
-      if (
-        "required" in raw.schema &&
-        (!Array.isArray(raw.schema.required) ||
-          !raw.schema.required.every((k) => typeof k === "string"))
-      ) {
-        throw new Error(`json_schema "required" must be an array of strings`);
-      }
-      if (
-        "properties" in raw.schema &&
-        (typeof raw.schema.properties !== "object" ||
-          raw.schema.properties === null ||
-          Array.isArray(raw.schema.properties))
-      ) {
-        throw new Error(`json_schema "properties" must be an object`);
-      }
-      if (
-        "type" in raw.schema &&
-        typeof raw.schema.type !== "string" &&
-        !Array.isArray(raw.schema.type)
-      ) {
-        throw new Error(`json_schema "type" must be a string or array of strings`);
-      }
+      validateJsonSchemaShape(raw.schema);
       return { type: "json_schema", schema: raw.schema };
     default:
       throw new Error(`Unknown assertion type: "${raw.type}"`);
   }
 }
 
-function resolvePath(suiteDir: string, p: string): string {
-  return isAbsolute(p) ? p : resolve(suiteDir, p);
+/**
+ * Resolve a case path (input / prompt / output) under the suite root and
+ * refuse anything that escapes it.
+ *
+ * suite.json is data — often contributed via pull request — and data does
+ * not get to name files outside its own suite. The previous resolver
+ * passed absolute paths through verbatim (`"output": "/etc/passwd"`
+ * read an arbitrary file, and the failing-case preview then printed its
+ * contents into the CI log) and happily followed `"output": "../../.."`
+ * anywhere on disk. Both are now hard load errors (exit 2).
+ *
+ * The jail is lexical: a symlink placed inside the suite by the suite's
+ * own author can still point elsewhere. That is an explicit on-disk
+ * action by someone who already controls the checkout — out of scope
+ * here, same boundary most build-tool sandboxes draw.
+ */
+function resolveCasePath(
+  rootDir: string,
+  p: string,
+  field: string,
+  caseId: string
+): string {
+  if (isAbsolute(p)) {
+    throw new Error(
+      `Case "${caseId}" field "${field}" must be a path relative to the suite directory, got absolute path: ${p}. ` +
+        `Absolute paths let a suite read files anywhere on disk.`
+    );
+  }
+  const resolved = resolve(rootDir, p);
+  const rel = relative(rootDir, resolved);
+  if (rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel)) {
+    throw new Error(
+      `Case "${caseId}" field "${field}" escapes the suite directory: ${p} (resolves to ${resolved}). ` +
+        `Case files must live under the suite root.`
+    );
+  }
+  return resolved;
 }
 
 export async function loadSuite(suitePath: string): Promise<Suite> {
@@ -187,12 +278,18 @@ export async function loadSuite(suitePath: string): Promise<Suite> {
     throw new Error(`Invalid JSON in suite file: ${suiteFile}`);
   }
 
-  if (!raw || typeof raw !== "object" || !raw.name || !Array.isArray(raw.cases)) {
-    throw new Error(`Suite must have "name" and "cases" array: ${suiteFile}`);
+  if (typeof raw.name !== "string" || raw.name.length === 0 || !Array.isArray(raw.cases)) {
+    throw new Error(
+      `Suite must have a non-empty string "name" and "cases" array: ${suiteFile}`
+    );
   }
 
+  // An empty suite evaluates to PASS by definition — a green gate over zero
+  // contracts. For a regression gate this must be a configuration error.
   if (raw.cases.length === 0) {
-    throw new Error(`Suite contains no test cases (empty cases array): ${suiteFile}`);
+    throw new Error(
+      `Suite has no test cases (${suiteFile}). An empty suite gates nothing — add a case or delete the suite.`
+    );
   }
 
   const seenIds = new Set<string>();
@@ -203,21 +300,23 @@ export async function loadSuite(suitePath: string): Promise<Suite> {
         `Each case needs id, input, prompt, output, assertions (case: ${c.id ?? "?"})`
       );
     }
-
     if (seenIds.has(c.id)) {
-      throw new Error(`Duplicate test case ID "${c.id}" found in suite: ${suiteFile}`);
+      throw new Error(
+        `Duplicate test case id "${c.id}" in ${suiteFile} — case ids must be unique (--case selection and reporting are ambiguous otherwise)`
+      );
     }
     seenIds.add(c.id);
-
     if (c.assertions.length === 0) {
-      throw new Error(`Test case "${c.id}" must contain at least one assertion (empty assertions array).`);
+      throw new Error(
+        `Case "${c.id}" has no assertions. A contract with zero assertions passes any output — add at least one assertion.`
+      );
     }
 
     return {
       id: c.id,
-      input: resolvePath(rootDir, c.input),
-      prompt: resolvePath(rootDir, c.prompt),
-      outputPath: resolvePath(rootDir, c.output),
+      input: resolveCasePath(rootDir, c.input, "input", c.id),
+      prompt: resolveCasePath(rootDir, c.prompt, "prompt", c.id),
+      outputPath: resolveCasePath(rootDir, c.output, "output", c.id),
       assertions: c.assertions.map(parseAssertion),
     };
   });

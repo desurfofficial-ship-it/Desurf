@@ -123,7 +123,9 @@ export async function initSuite(targetDir: string): Promise<string> {
   await atomicWriteFile(join(promptsDir, "classify.txt"), PROMPT_TXT, "utf8");
   const outputPath = join(outputsDir, "classify.json");
   await atomicWriteFile(outputPath, OUTPUT_JSON, "utf8");
-  await writeCassetteMeta(outputPath, INPUT_TXT, PROMPT_TXT);
+  // v2 sidecar: the generated demo cassette is tamper-protected from the
+  // very first `desurf test`, same as seal/record output.
+  await writeCassetteMeta(outputPath, INPUT_TXT, PROMPT_TXT, undefined, OUTPUT_JSON);
 
   return abs;
 }
