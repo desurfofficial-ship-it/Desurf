@@ -65,10 +65,13 @@ desurf test --suite ./my-suite
 
 **After changing a prompt or input** (sealed/recorded suite):
 
-1. `desurf test` fails with **ERROR (exit 2)** — “Prompt/Input changed since output was recorded.”
-2. Either restore the previous prompt/input, or refresh the cassette:
-   - Offline: update the output file, then `desurf seal --suite ./my-suite --force`
-   - Live: `desurf record --suite ./my-suite --provider openrouter --force`
+1. `desurf test` fails with **ERROR (exit 2)** — prompt/input no longer matches the cassette fingerprints.
+2. Choose an explicit remediation (Desurf never auto-repairs):
+   - **Keep the existing output** and re-fingerprint current prompt/input (offline, no API key):
+     `desurf seal --suite ./my-suite --force`
+   - **Obtain a new provider output** and provenance:
+     `desurf record --suite ./my-suite --provider openrouter --force`
+   - Or restore the previous prompt/input files.
 
 ### Why exit 2 vs exit 1?
 
