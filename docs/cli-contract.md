@@ -151,6 +151,7 @@ Consumers can gate PRs with the composite Action at the repository root (`action
 ```
 
 - Action ref and npm `version` are **independent** pins; the Action installs the published package, not the Action checkout source.
+- `@main` is a moving development ref; prefer a commit SHA for production. A stable `v0.4` Action tag is reserved for the future v0.4 release and does not exist until that release is cut.
 - npm install may use the network; the **test** invocation is offline (no provider / no `OPENROUTER_API_KEY` / no record).
 - Exit codes **0 / 1 / 2** are propagated unchanged.
 - Install is isolated to a temporary directory (consumer workspace package files are not modified).
