@@ -139,15 +139,23 @@ Desurf is designed for offline CI gating. Exit codes fail the job automatically:
 
 ```yaml
 - uses: actions/checkout@v4
-- uses: desurfofficial-ship-it/Desurf@main
+- uses: desurfofficial-ship-it/Desurf@main   # or a full commit SHA; do not invent tags
   with:
     suite: ./desurf-suite
-    # package-version: "0.3.0"   # optional pin
+    version: "0.3.0"   # npm package pin (never "latest")
 ```
 
-- Offline only (default provider). No `OPENROUTER_API_KEY`.
-- Propagates Desurf exit codes **0 / 1 / 2** so the job fails on REGRESSION or ERROR.
-- See [`action.yml`](action.yml).
+**Pins are independent:**
+- **Action ref** (`uses: ...@ref`) selects the Action definition. Prefer a full **commit SHA** for supply-chain reproducibility. Use only refs that exist (e.g. `@main`); do not invent tags.
+- **`version`** selects the published **`@desurfofficial-ship-it/desurf`** npm package the Action installs. It does **not** run the Action checkout’s source tree.
+
+**Network vs offline:** npm install needs network once. The Desurf **test** gate is offline (no live provider, no `OPENROUTER_API_KEY`, no record).
+
+**Stale cassettes:** sealed/recorded prompt or input drift → exit **2**. Refresh offline with `desurf seal --force` (keeps output) or re-capture with `desurf record --force`.
+
+- Propagates exit codes **0 / 1 / 2**.
+- Installs into a temporary directory (does not modify consumer `package.json` / lockfile / `node_modules`).
+- See [`action.yml`](action.yml) and [`examples/github-actions/desurf.yml`](examples/github-actions/desurf.yml).
 
 ### This repository (source build)
 
