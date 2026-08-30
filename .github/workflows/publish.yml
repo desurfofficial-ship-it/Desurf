@@ -30,11 +30,20 @@ jobs:
       - name: Verify release version
         run: |
           PKG_VERSION="$(node -p "require('./package.json').version")"
-          TAG="${{ github.event.release.tag_name }}"
 
-          if [ "${TAG#v}" != "$PKG_VERSION" ]; then
-            echo "Release tag $TAG does not match package.json version $PKG_VERSION"
-            exit 1
+          if [ "${{ github.event_name }}" = "release" ]; then
+            TAG="${{ github.event.release.tag_name }}"
+            if [ "${TAG#v}" != "$PKG_VERSION" ]; then
+              echo "Release tag $TAG does not match package.json version $PKG_VERSION"
+              exit 1
+            fi
+          else
+            TAG="v$PKG_VERSION"
+            if ! git ls-remote --tags origin "refs/tags/$TAG" | grep -q "$TAG$"; then
+              echo "Tag $TAG does not exist on the repository"
+              exit 1
+            fi
+            echo "Manual dispatch: verified tag $TAG exists and matches package.json version $PKG_VERSION"
           fi
 
       - name: Install dependencies
