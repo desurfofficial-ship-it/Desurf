@@ -1,8 +1,8 @@
 /**
- * desurf seal — establish offline cassette provenance from existing output files.
+ * Offline cassette sealing.
  *
- * Computes SHA-256 hashes of current input and prompt files for each test case
- * and writes the `<outputPath>.desurf` sidecar without calling any provider or model.
+ * Establishes provenance metadata for existing saved outputs without calling
+ * a provider. Hashes the current input+prompt and writes a `.desurf` sidecar.
  */
 
 import { access, constants, readFile, stat } from "node:fs/promises";
@@ -27,20 +27,20 @@ export type SealSummary = {
   results: SealCaseResult[];
 };
 
-async function isNonEmptyFile(path: string): Promise<boolean> {
+async function fileExists(path: string): Promise<boolean> {
   try {
     await access(path, constants.F_OK);
-    const s = await stat(path);
-    return s.isFile() && s.size > 0;
+    return true;
   } catch {
     return false;
   }
 }
 
-async function fileExists(path: string): Promise<boolean> {
+async function isNonEmptyFile(path: string): Promise<boolean> {
   try {
     await access(path, constants.F_OK);
-    return true;
+    const s = await stat(path);
+    return s.isFile() && s.size > 0;
   } catch {
     return false;
   }
@@ -55,7 +55,7 @@ async function sealOne(
       return {
         caseId: testCase.id,
         status: "error",
-        message: `Output file does not exist or is empty: ${testCase.outputPath}. Create or provide an output file before sealing.`,
+        message: `Missing or empty output file: ${testCase.outputPath}`,
       };
     }
 
@@ -75,7 +75,7 @@ async function sealOne(
       readFile(testCase.prompt, "utf8"),
     ]);
 
-    await writeCassetteMeta(testCase.outputPath, inputText, promptText);
+    await writeCassetteMeta(testCase.outputPath, inputText, promptText, "seal");
 
     return {
       caseId: testCase.id,
