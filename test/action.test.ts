@@ -84,6 +84,22 @@ describe("GitHub Action (action.yml) — offline CI gate", () => {
     expect(content).toMatch(/suite:\s*.+/);
     expect(content).not.toMatch(/OPENROUTER_API_KEY\s*:/);
   });
+
+  it("declares author metadata for consumer discovery", async () => {
+    const content = await readFile(resolve("action.yml"), "utf8");
+    expect(content).toMatch(/author:\s*desurfofficial-ship-it/);
+  });
+
+  it("documents Action ref vs npm version and does not invent v0.4 tag usage", async () => {
+    const readme = await readFile(resolve("README.md"), "utf8");
+    expect(readme).toMatch(/Pins are independent/i);
+    expect(readme).toMatch(/@main/);
+    expect(readme).toMatch(/commit SHA/i);
+    expect(readme).toMatch(/v0\.4.*(?:not|until|planned|reserved)/i);
+    const example = await readFile(resolve("examples/github-actions/desurf.yml"), "utf8");
+    expect(example).toMatch(/uses:\s*desurfofficial-ship-it\/Desurf@main/);
+    expect(example).not.toMatch(/uses:\s*desurfofficial-ship-it\/Desurf@v0\.4/);
+  });
 });
 
 describe("Desurf exit-code contract (Action quality gate)", () => {
