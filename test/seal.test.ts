@@ -304,4 +304,103 @@ describe("desurf seal (offline cassette provenance)", () => {
     expect(res.results[0].status).toBe("error");
     expect(res.results[0].message).toMatch(/Output file does not exist or is empty/i);
   });
+
+  it("Error when output file is empty", async () => {
+    const suiteDir = join(dir, "suite-empty-out");
+    await createManualSuite(suiteDir);
+    await writeFile(join(suiteDir, "outputs", "resp.json"), "", "utf8");
+
+    const res = await sealSuite({ suitePath: suiteDir });
+    expect(res.results[0].status).toBe("error");
+    expect(res.results[0].message).toMatch(/Output file does not exist or is empty/i);
+  });
+
+  it("Direct suite.json path works for seal", async () => {
+    const suiteDir = join(dir, "suite-json-path");
+    await createManualSuite(suiteDir);
+    const suiteJson = join(suiteDir, "suite.json");
+
+    const res = await sealSuite({ suitePath: suiteJson });
+    expect(res.results[0].status).toBe("sealed");
+
+    const metaPath = metaPathFor(join(suiteDir, "outputs", "resp.json"));
+    const meta = JSON.parse(await readFile(metaPath, "utf8"));
+    expect(meta.version).toBe(1);
+
+    const summary = await runSuite({
+      suitePath: suiteJson,
+      provider: new SavedOutputAdapter(),
+    });
+    expect(summary.passed).toBe(1);
+    expect(summary.errors).toBe(0);
+  });
+
+  it("--case only seals the requested case", async () => {
+    const suiteDir = join(dir, "suite-multi-case");
+    await mkdir(join(suiteDir, "inputs"), { recursive: true });
+    await mkdir(join(suiteDir, "prompts"), { recursive: true });
+    await mkdir(join(suiteDir, "outputs"), { recursive: true });
+
+    await writeFile(join(suiteDir, "inputs", "a.txt"), "input a\n", "utf8");
+    await writeFile(join(suiteDir, "inputs", "b.txt"), "input b\n", "utf8");
+    await writeFile(join(suiteDir, "prompts", "p.txt"), "prompt\n", "utf8");
+    await writeFile(
+      join(suiteDir, "outputs", "a.json"),
+      JSON.stringify({ category: "billing", explanation: "a" }) + "\n",
+      "utf8"
+    );
+    await writeFile(
+      join(suiteDir, "outputs", "b.json"),
+      JSON.stringify({ category: "billing", explanation: "b" }) + "\n",
+      "utf8"
+    );
+
+    await writeFile(
+      join(suiteDir, "suite.json"),
+      JSON.stringify(
+        {
+          name: "multi",
+          cases: [
+            {
+              id: "case-a",
+              input: "inputs/a.txt",
+              prompt: "prompts/p.txt",
+              output: "outputs/a.json",
+              assertions: [{ type: "required", value: "billing" }],
+            },
+            {
+              id: "case-b",
+              input: "inputs/b.txt",
+              prompt: "prompts/p.txt",
+              output: "outputs/b.json",
+              assertions: [{ type: "required", value: "billing" }],
+            },
+          ],
+        },
+        null,
+        2
+      ) + "\n",
+      "utf8"
+    );
+
+    const res = await sealSuite({ suitePath: suiteDir, caseId: "case-a" });
+    expect(res.results).toHaveLength(1);
+    expect(res.results[0].caseId).toBe("case-a");
+    expect(res.results[0].status).toBe("sealed");
+
+    // Only case-a should have metadata
+    const metaA = metaPathFor(join(suiteDir, "outputs", "a.json"));
+    const metaB = metaPathFor(join(suiteDir, "outputs", "b.json"));
+    await expect(readFile(metaA, "utf8")).resolves.toMatch(/inputSha256/);
+    await expect(readFile(metaB, "utf8")).rejects.toThrow();
+  });
+
+  it("Unknown --case id throws", async () => {
+    const suiteDir = join(dir, "suite-unknown-case");
+    await createManualSuite(suiteDir);
+    await expect(
+      sealSuite({ suitePath: suiteDir, caseId: "does-not-exist" })
+    ).rejects.toThrow(/No test case with id/i);
+  });
+
 });
