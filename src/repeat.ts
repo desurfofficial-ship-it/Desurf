@@ -56,5 +56,7 @@ export function summarizeCase(
     passCount,
     failCount,
     errorCount,
+    // Runner overwrites with disk-derived state; default is unsealed.
+    cassetteState: "unsealed",
   };
 }
