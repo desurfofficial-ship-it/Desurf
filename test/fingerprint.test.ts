@@ -73,6 +73,8 @@ describe("stale fixture detection", () => {
     expect(summary.passed).toBe(0);
     const err = summary.cases[0].executions[0].error ?? "";
     expect(err).toMatch(/Prompt changed since output was recorded/i);
+    expect(err).toMatch(/desurf seal --force/i);
+    expect(err).toMatch(/desurf record --force/i);
   });
 
   it("C: change input → ERROR", async () => {
