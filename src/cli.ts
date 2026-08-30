@@ -12,6 +12,8 @@ import { initSuite } from "./init.js";
 import { recordSuite } from "./record.js";
 import { runSuite } from "./runner.js";
 import { sealSuite } from "./seal.js";
+import { inspectSuite } from "./inspect.js";
+import type { InspectSummary } from "./inspect.js";
 import type { CaseReliability } from "./types.js";
 import type { RunSummary } from "./runner.js";
 
@@ -47,6 +49,7 @@ Commands:
   init      Create a minimal runnable offline suite
   record    Capture live provider outputs into suite output files
   seal      Establish offline cassette provenance from existing output files
+  inspect   Report cassette provenance status (read-only, offline)
 
 Global options:
   --version, -v    Print version and exit
@@ -162,6 +165,37 @@ Notes:
 Exit codes:
   0  all selected cases sealed or intentionally skipped
   2  configuration / file error, or any case failed to seal
+`);
+}
+
+function printInspectHelp(): void {
+  console.log(`desurf inspect — report cassette provenance status (read-only)
+
+Usage:
+  desurf inspect --suite <path> [options]
+
+Options:
+  --suite <path>       Path to suite directory (or suite.json) (required)
+  --case <id>          Inspect only the named test case
+  --json               Machine-readable JSON on stdout
+  --help, -h           Show this help
+
+Reports for each case:
+  - cassette state: UNSEALED | SEALED | RECORDED | INVALID
+  - whether .desurf metadata exists
+  - whether current prompt/input match stored fingerprints
+  - overall provenance status: unsealed | fresh | stale | invalid
+
+Notes:
+  - Purely offline. No provider, API key, or network required.
+  - Read-only: never writes .desurf files or cassette outputs.
+  - Does not evaluate assertions or model behavior.
+  - Stale provenance is informational (exit 0); use desurf test for gate.
+  - INVALID means a sidecar exists but cannot be parsed (exit 2).
+
+Exit codes:
+  0  inspection completed
+  2  configuration / suite load / invalid metadata error
 `);
 }
 
@@ -519,6 +553,86 @@ async function cmdSeal(parsed: ParsedArgs): Promise<number> {
   }
 }
 
+
+async function cmdInspect(parsed: ParsedArgs): Promise<number> {
+  if (parsed.help) {
+    printInspectHelp();
+    return 0;
+  }
+  if (!parsed.suite) {
+    console.error("Missing required option: --suite <path>");
+    printInspectHelp();
+    return 2;
+  }
+
+  try {
+    const summary = await inspectSuite({
+      suitePath: resolve(parsed.suite),
+      caseId: parsed.caseId,
+    });
+
+    if (parsed.json) {
+      console.log(JSON.stringify(inspectToJson(summary), null, 2));
+      const anyInvalid = summary.cases.some((c) => c.provenanceStatus === "invalid");
+      return anyInvalid ? 2 : 0;
+    }
+
+    console.log(`Desurf inspect — suite "${summary.suiteName}"\n`);
+    let anyInvalid = false;
+    for (const c of summary.cases) {
+      const state = c.cassetteState.toUpperCase();
+      console.log(`• ${c.caseId}`);
+      console.log(`  cassette: ${state}`);
+      console.log(`  output:   ${c.outputPath}`);
+      console.log(`  meta:     ${c.metaPresent ? c.metaPath : "(none)"}`);
+      if (c.provenanceStatus === "unsealed") {
+        console.log(`  status:   UNSEALED — no provenance; prompt/input drift cannot be detected`);
+        console.log(`  next:     run \`desurf seal --suite <path>\` to establish offline provenance`);
+      } else if (c.provenanceStatus === "fresh") {
+        console.log(`  prompt:   fresh`);
+        console.log(`  input:    fresh`);
+        console.log(`  status:   FRESH — fingerprints match current prompt and input`);
+      } else if (c.provenanceStatus === "stale") {
+        console.log(`  prompt:   ${c.promptFresh ? "fresh" : "STALE"}`);
+        console.log(`  input:    ${c.inputFresh ? "fresh" : "STALE"}`);
+        console.log(`  status:   STALE — ${c.detail ?? "fingerprints do not match"}`);
+        console.log(`  next:     restore input/prompt or re-seal / re-record`);
+      } else {
+        anyInvalid = true;
+        console.log(`  status:   INVALID — ${c.detail ?? "malformed provenance metadata"}`);
+        console.log(`  next:     repair or re-seal / re-record the cassette metadata`);
+      }
+      console.log();
+    }
+    return anyInvalid ? 2 : 0;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (parsed.json) {
+      console.error(JSON.stringify({ error: msg }));
+    } else {
+      console.error("Desurf error:", msg);
+    }
+    return 2;
+  }
+}
+
+function inspectToJson(summary: InspectSummary): object {
+  return {
+    suite: summary.suiteName,
+    cases: summary.cases.map((c) => ({
+      caseId: c.caseId,
+      outputPath: c.outputPath,
+      metaPath: c.metaPath,
+      cassetteState: c.cassetteState,
+      metaPresent: c.metaPresent,
+      promptFresh: c.promptFresh,
+      inputFresh: c.inputFresh,
+      provenanceStatus: c.provenanceStatus,
+      detail: c.detail ?? null,
+    })),
+  };
+}
+
 async function main(): Promise<number> {
   let parsed: ParsedArgs;
   try {
@@ -536,7 +650,7 @@ async function main(): Promise<number> {
 
   if (
     parsed.command === "help" ||
-    (parsed.help && !["test", "init", "record", "seal"].includes(parsed.command))
+    (parsed.help && !["test", "init", "record", "seal", "inspect"].includes(parsed.command))
   ) {
     printRootHelp();
     return 0;
@@ -551,6 +665,8 @@ async function main(): Promise<number> {
       return cmdRecord(parsed);
     case "seal":
       return cmdSeal(parsed);
+    case "inspect":
+      return cmdInspect(parsed);
     default:
       console.error(`Unknown command: ${parsed.command}`);
       printRootHelp();
