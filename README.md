@@ -135,7 +135,21 @@ Desurf is designed for offline CI gating. Exit codes fail the job automatically:
 | 1 | REGRESSION / FLAKY | red |
 | 2 | ERROR (config, missing files, stale fixture, …) | red |
 
-**This repository** builds the CLI from source and runs the offline fixture (no API keys):
+### Reusable Action (recommended for app repos)
+
+```yaml
+- uses: actions/checkout@v4
+- uses: desurfofficial-ship-it/Desurf@main
+  with:
+    suite: ./desurf-suite
+    # package-version: "0.3.0"   # optional pin
+```
+
+- Offline only (default provider). No `OPENROUTER_API_KEY`.
+- Propagates Desurf exit codes **0 / 1 / 2** so the job fails on REGRESSION or ERROR.
+- See [`action.yml`](action.yml).
+
+### This repository (source build)
 
 ```bash
 npm install
@@ -143,7 +157,7 @@ npm run build
 node dist/cli.js test --suite fixtures/basic
 ```
 
-**Your application repository** can copy [`examples/github-actions/desurf.yml`](examples/github-actions/desurf.yml) and point `--suite` at your committed suite:
+**Alternative (inline CLI):** copy [`examples/github-actions/desurf.yml`](examples/github-actions/desurf.yml) or run:
 
 ```yaml
 - run: npx --yes @desurfofficial-ship-it/desurf test --suite ./desurf-suite
