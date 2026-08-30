@@ -55,6 +55,21 @@ async function pathExists(p: string): Promise<boolean> {
   }
 }
 
+
+/**
+ * Report whether a cassette has provenance metadata.
+ * Does not validate hashes (use assertCassetteFresh for that).
+ */
+export async function readCassetteState(
+  outputPath: string
+): Promise<"unsealed" | "sealed"> {
+  const metaFile = metaPathFor(outputPath);
+  if (!(await pathExists(metaFile))) {
+    return "unsealed";
+  }
+  return "sealed";
+}
+
 /**
  * If a meta sidecar exists, verify current input/prompt match the recorded hashes.
  * Throws with a clear message on mismatch (caller maps this to ERROR / exit 2).

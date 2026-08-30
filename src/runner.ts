@@ -6,7 +6,7 @@
 import { readFile } from "node:fs/promises";
 import { evaluateTestCase } from "./engine.js";
 import { loadSuite } from "./offline.js";
-import { assertCassetteFresh } from "./fingerprint.js";
+import { assertCassetteFresh, readCassetteState } from "./fingerprint.js";
 import { SavedOutputAdapter } from "./provider.js";
 import { summarizeCase } from "./repeat.js";
 import type {
@@ -89,7 +89,9 @@ export async function runSuite(options: RunOptions): Promise<RunSummary> {
     for (let i = 0; i < repeat; i++) {
       executions.push(await runOneExecution(c, provider));
     }
-    caseResults.push(summarizeCase(c.id, executions));
+    const reliability = summarizeCase(c.id, executions);
+    const cassetteState = await readCassetteState(c.outputPath);
+    caseResults.push({ ...reliability, cassetteState });
   }
 
   const passed = caseResults.filter((c) => c.state === "PASS").length;
