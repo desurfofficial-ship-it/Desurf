@@ -1,6 +1,6 @@
 {
   "name": "@desurfofficial-ship-it/desurf",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Offline-first CLI for testing AI prompt behavior and detecting regressions",
   "type": "module",
   "main": "./dist/cli.js",

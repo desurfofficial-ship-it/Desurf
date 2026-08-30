@@ -12,7 +12,7 @@ Semantic Versioning (`MAJOR.MINOR.PATCH`):
 | New assertions, options, providers (backward compatible) | MINOR |
 | Bug fixes, docs, packaging | PATCH |
 
-Current version: **0.1.1** (MVP foundation).
+Current version: **0.4.0**.
 
 Exit codes `0` / `1` / `2` are part of the **public API**. Do not change their meanings without a major version bump.
 
@@ -41,7 +41,7 @@ npm run pack:check     # dry-run of npm pack
 2. Bump `version` in `package.json` if needed.
 3. `npm run build && npm test && npm run test:offline`
 4. `npm publish` (requires npm auth; package is configured `access: public`).
-5. Tag the release in git: `git tag v0.1.1 && git push --tags`
+5. Tag the release in git: `git tag v0.4.0 && git push --tags`
 
 ## Local install without publishing
 

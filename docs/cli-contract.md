@@ -147,7 +147,7 @@ Consumers can gate PRs with the composite Action at the repository root (`action
 - uses: desurfofficial-ship-it/Desurf@main   # or full commit SHA; only existing refs
   with:
     suite: ./desurf-suite
-    version: "0.3.0"   # published npm package pin (never "latest")
+    version: "0.4.0"   # published npm package pin (never "latest")
 ```
 
 - Action ref and npm `version` are **independent** pins; the Action installs the published package, not the Action checkout source.

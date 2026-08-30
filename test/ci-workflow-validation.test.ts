@@ -31,4 +31,16 @@ describe("GitHub Actions workflow validation", () => {
     expect(content).toMatch(/branches:\s*\[main/);
     expect(content).toMatch(/node dist\/cli\.js test --suite/);
   });
+
+  it(".github/workflows/publish.yml has valid structure, Trusted Publishing config, and installs correctly", async () => {
+    const yamlPath = resolve(".github/workflows/publish.yml");
+    const content = await readFile(yamlPath, "utf8");
+
+    expect(content).toMatch(/id-token:\s*write/);
+    expect(content).toMatch(/actions\/checkout@v4/);
+    expect(content).toMatch(/actions\/setup-node@v4/);
+    expect(content).toMatch(/npm install/);
+    expect(content).not.toMatch(/npm ci/);
+    expect(content).toMatch(/npm publish --access public/);
+  });
 });

@@ -4,11 +4,11 @@ import { existsSync } from "node:fs";
 import { join, resolve, relative } from "node:path";
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
-import { runSuite } from "./dist/runner.js";
-import { initSuite } from "./dist/init.js";
-import { recordSuite } from "./dist/record.js";
-import { createProvider } from "./dist/create-provider.js";
-import { loadSuite } from "./dist/offline.js";
+import { runSuite } from "./src/runner.js";
+import { initSuite } from "./src/init.js";
+import { recordSuite } from "./src/record.js";
+import { createProvider } from "./src/create-provider.js";
+import { loadSuite } from "./src/offline.js";
 import type { Suite } from "./src/types.js";
 
 const execAsync = promisify(exec);
@@ -16,6 +16,17 @@ const app = express();
 const PORT = 3000;
 
 app.use(express.json());
+
+// CORS and header middleware for iframe preview compatibility
+app.use((_req, res, next) => {
+  res.header("Access-Control-Allow-Origin", "*");
+  res.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+  res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept, Authorization");
+  if (_req.method === "OPTIONS") {
+    return res.sendStatus(200);
+  }
+  next();
+});
 
 // Recursive helper to discover all suite.json files in workspace
 async function discoverSuites(dir: string, results: string[] = []): Promise<string[]> {
@@ -42,7 +53,7 @@ async function discoverSuites(dir: string, results: string[] = []): Promise<stri
 
 // Health check
 app.get("/api/health", (_req, res) => {
-  res.json({ status: "ok", app: "Desurf", version: "0.3.0" });
+  res.json({ status: "ok", app: "Desurf", version: "0.4.0" });
 });
 
 // Environment configuration check

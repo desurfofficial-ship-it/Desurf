@@ -31,10 +31,10 @@ inputs:
   version:
     description: >
       Published npm package version of @desurfofficial-ship-it/desurf to install
-      (e.g. "0.3.0"). Defaults to the current stable release. Do not use "latest".
+      (e.g. "0.4.0"). Defaults to the current stable release. Do not use "latest".
       Independent of the Action ref (uses: desurfofficial-ship-it/Desurf@...).
     required: false
-    default: "0.3.0"
+    default: "0.4.0"
   package-version:
     description: >
       Deprecated alias for `version`. Prefer `version`. If both are set, `version` wins.

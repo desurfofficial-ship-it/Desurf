@@ -1,6 +1,6 @@
 # Desurf — Test Case & Suite Schema
 
-This document describes the shape of suites, test cases, and assertions as implemented in Desurf 0.1.1.
+This document describes the shape of suites, test cases, and assertions as implemented in Desurf.
 
 ## Suite
 

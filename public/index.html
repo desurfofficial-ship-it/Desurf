@@ -42,7 +42,7 @@
         <div>
           <div class="flex items-center space-x-2">
             <span class="font-bold text-lg tracking-tight text-white">Desurf</span>
-            <span class="text-[11px] font-mono px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">v0.3.0</span>
+            <span class="text-[11px] font-mono px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">v0.4.0</span>
             <span class="text-[11px] font-mono px-2 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20">Offline-First</span>
           </div>
           <p class="text-xs text-slate-400">Prompt Behavioral Testing & Regression Detection</p>
@@ -336,6 +336,23 @@ Try: test --suite fixtures/basic --repeat 3
   <script>
     let allSuites = [];
 
+    function apiUrl(path) {
+      if (!path) return '';
+      if (path.startsWith('http://') || path.startsWith('https://')) return path;
+      const cleanPath = path.startsWith('/') ? path : '/' + path;
+      try {
+        if (typeof window !== 'undefined' && window.location && window.location.origin && window.location.origin !== 'null' && !window.location.origin.startsWith('about')) {
+          return `${window.location.origin}${cleanPath}`;
+        }
+      } catch {}
+      return cleanPath;
+    }
+
+    async function apiFetch(path, options = {}) {
+      const url = apiUrl(path);
+      return fetch(url, options);
+    }
+
     function switchTab(tabId) {
       const tabs = ['runner', 'inspector', 'cli', 'init', 'docs'];
       tabs.forEach(t => {
@@ -357,52 +374,77 @@ Try: test --suite fixtures/basic --repeat 3
 
     async function loadSuitesData() {
       try {
-        const res = await fetch('/api/suites');
+        const res = await apiFetch('/api/suites');
+        if (!res.ok) {
+          throw new Error(`Server returned HTTP ${res.status}: ${res.statusText}`);
+        }
         const data = await res.json();
-        allSuites = data.suites || [];
+        allSuites = Array.isArray(data.suites) ? data.suites : [];
 
         const sel = document.getElementById('run-suite-select');
-        const currentVal = sel.value;
-        sel.innerHTML = allSuites.map(s => `<option value="${s.path}">${s.path} (${s.name})</option>`).join('');
-        if (allSuites.some(s => s.path === currentVal)) {
-          sel.value = currentVal;
+        if (sel) {
+          const currentVal = sel.value;
+          sel.innerHTML = allSuites.map(s => `<option value="${escapeHtml(s.path)}">${escapeHtml(s.path)} (${escapeHtml(s.name)})</option>`).join('');
+          if (allSuites.some(s => s.path === currentVal)) {
+            sel.value = currentVal;
+          }
         }
         onSuiteSelectChange();
 
-        renderInspector();
+        await renderInspector();
       } catch (err) {
         console.error('Failed to load suites', err);
+        const container = document.getElementById('suite-inspector-content');
+        if (container) {
+          container.innerHTML = `
+            <div class="bg-rose-950/30 border border-rose-800 rounded-xl p-5 text-rose-300 font-mono text-xs">
+              <div class="font-bold text-sm mb-1">Failed to load test suites</div>
+              <p class="text-rose-400 mb-3">${escapeHtml(err.message || String(err))}</p>
+              <button onclick="loadSuitesData()" class="px-3 py-1.5 rounded bg-rose-900/60 hover:bg-rose-800 text-white font-sans text-xs">
+                ↻ Retry Loading
+              </button>
+            </div>
+          `;
+        }
       }
     }
 
     function onSuiteSelectChange() {
-      const suitePath = document.getElementById('run-suite-select').value;
+      const suiteSelect = document.getElementById('run-suite-select');
+      if (!suiteSelect) return;
+      const suitePath = suiteSelect.value;
       const suite = allSuites.find(s => s.path === suitePath);
       const caseSelect = document.getElementById('run-case-select');
-      if (!suite || !suite.cases) {
+      if (!caseSelect) return;
+      if (!suite || !Array.isArray(suite.cases)) {
         caseSelect.innerHTML = '<option value="">All Cases in Suite</option>';
         return;
       }
       caseSelect.innerHTML = '<option value="">All Cases in Suite</option>' +
-        suite.cases.map(c => `<option value="${c.id}">${c.id}</option>`).join('');
+        suite.cases.map(c => `<option value="${escapeHtml(c.id)}">${escapeHtml(c.id)}</option>`).join('');
     }
 
     async function executeRunSuite() {
-      const suitePath = document.getElementById('run-suite-select').value;
-      const caseId = document.getElementById('run-case-select').value;
-      const provider = document.getElementById('run-provider-select').value;
-      const repeat = document.getElementById('run-repeat-input').value;
+      const suiteSelect = document.getElementById('run-suite-select');
+      const caseSelect = document.getElementById('run-case-select');
+      const providerSelect = document.getElementById('run-provider-select');
+      const repeatInput = document.getElementById('run-repeat-input');
+
+      const suitePath = suiteSelect ? suiteSelect.value : "fixtures/basic";
+      const caseId = caseSelect ? caseSelect.value : "";
+      const provider = providerSelect ? providerSelect.value : "offline";
+      const repeat = repeatInput ? repeatInput.value : 1;
 
       const btn = document.getElementById('run-btn');
       const spinner = document.getElementById('run-btn-spinner');
       const text = document.getElementById('run-btn-text');
 
-      btn.disabled = true;
-      spinner.classList.remove('hidden');
-      text.textContent = 'Running Suite...';
+      if (btn) btn.disabled = true;
+      if (spinner) spinner.classList.remove('hidden');
+      if (text) text.textContent = 'Running Suite...';
 
       try {
-        const res = await fetch('/api/run', {
+        const res = await apiFetch('/api/run', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ suitePath, caseId, provider, repeat }),
@@ -411,11 +453,11 @@ Try: test --suite fixtures/basic --repeat 3
         const data = await res.json();
         renderRunResults(data);
       } catch (err) {
-        alert('Run failed: ' + err.message);
+        alert('Run failed: ' + (err.message || String(err)));
       } finally {
-        btn.disabled = false;
-        spinner.classList.add('hidden');
-        text.textContent = 'Execute Suite';
+        if (btn) btn.disabled = false;
+        if (spinner) spinner.classList.add('hidden');
+        if (text) text.textContent = 'Execute Suite';
       }
     }
 
@@ -426,47 +468,63 @@ Try: test --suite fixtures/basic --repeat 3
       const suiteName = document.getElementById('results-suite-name');
       const timestamp = document.getElementById('results-timestamp');
 
-      banner.classList.remove('hidden');
-      timestamp.textContent = 'Executed at ' + new Date().toLocaleTimeString();
+      if (banner) banner.classList.remove('hidden');
+      if (timestamp) timestamp.textContent = 'Executed at ' + new Date().toLocaleTimeString();
 
       if (data.error) {
-        statusBadge.textContent = 'ERROR';
-        statusBadge.className = 'px-3.5 py-1 rounded-full font-mono text-sm font-bold tracking-wide bg-purple-500/20 text-purple-400 border border-purple-500/30';
-        bannerContainer.className = 'rounded-xl border border-purple-500/30 bg-purple-950/20 p-5';
-        document.getElementById('cases-container').innerHTML = `
-          <div class="p-4 rounded-xl bg-purple-950/30 border border-purple-800 text-purple-200 font-mono text-xs">
-            ${escapeHtml(data.error)}
-          </div>
-        `;
+        if (statusBadge) {
+          statusBadge.textContent = 'ERROR';
+          statusBadge.className = 'px-3.5 py-1 rounded-full font-mono text-sm font-bold tracking-wide bg-purple-500/20 text-purple-400 border border-purple-500/30';
+        }
+        if (bannerContainer) {
+          bannerContainer.className = 'rounded-xl border border-purple-500/30 bg-purple-950/20 p-5';
+        }
+        const container = document.getElementById('cases-container');
+        if (container) {
+          container.innerHTML = `
+            <div class="p-4 rounded-xl bg-purple-950/30 border border-purple-800 text-purple-200 font-mono text-xs">
+              ${escapeHtml(data.error)}
+            </div>
+          `;
+        }
         return;
       }
 
-      const summary = data.summary;
-      suiteName.textContent = 'Suite: ' + summary.suiteName;
-      document.getElementById('count-passed').textContent = summary.passed;
-      document.getElementById('count-flaky').textContent = summary.flaky;
-      document.getElementById('count-regression').textContent = summary.regression;
-      document.getElementById('count-errors').textContent = summary.errors;
+      const summary = data.summary || {};
+      if (suiteName) suiteName.textContent = 'Suite: ' + (summary.suiteName || 'unknown');
+      const pCount = document.getElementById('count-passed');
+      const fCount = document.getElementById('count-flaky');
+      const rCount = document.getElementById('count-regression');
+      const eCount = document.getElementById('count-errors');
+      if (pCount) pCount.textContent = summary.passed ?? 0;
+      if (fCount) fCount.textContent = summary.flaky ?? 0;
+      if (rCount) rCount.textContent = summary.regression ?? 0;
+      if (eCount) eCount.textContent = summary.errors ?? 0;
 
-      const state = data.status;
-      statusBadge.textContent = state;
+      const state = data.status || 'ERROR';
+      if (statusBadge) statusBadge.textContent = state;
 
-      if (state === 'PASS') {
-        statusBadge.className = 'px-3.5 py-1 rounded-full font-mono text-sm font-bold tracking-wide bg-emerald-500/20 text-emerald-400 border border-emerald-500/30';
-        bannerContainer.className = 'rounded-xl border border-emerald-500/30 bg-emerald-950/10 p-5';
-      } else if (state === 'FLAKY') {
-        statusBadge.className = 'px-3.5 py-1 rounded-full font-mono text-sm font-bold tracking-wide bg-amber-500/20 text-amber-400 border border-amber-500/30';
-        bannerContainer.className = 'rounded-xl border border-amber-500/30 bg-amber-950/10 p-5';
-      } else if (state === 'REGRESSION') {
-        statusBadge.className = 'px-3.5 py-1 rounded-full font-mono text-sm font-bold tracking-wide bg-rose-500/20 text-rose-400 border border-rose-500/30';
-        bannerContainer.className = 'rounded-xl border border-rose-500/30 bg-rose-950/10 p-5';
-      } else {
-        statusBadge.className = 'px-3.5 py-1 rounded-full font-mono text-sm font-bold tracking-wide bg-purple-500/20 text-purple-400 border border-purple-500/30';
-        bannerContainer.className = 'rounded-xl border border-purple-500/30 bg-purple-950/10 p-5';
+      if (bannerContainer) {
+        if (state === 'PASS') {
+          if (statusBadge) statusBadge.className = 'px-3.5 py-1 rounded-full font-mono text-sm font-bold tracking-wide bg-emerald-500/20 text-emerald-400 border border-emerald-500/30';
+          bannerContainer.className = 'rounded-xl border border-emerald-500/30 bg-emerald-950/10 p-5';
+        } else if (state === 'FLAKY') {
+          if (statusBadge) statusBadge.className = 'px-3.5 py-1 rounded-full font-mono text-sm font-bold tracking-wide bg-amber-500/20 text-amber-400 border border-amber-500/30';
+          bannerContainer.className = 'rounded-xl border border-amber-500/30 bg-amber-950/10 p-5';
+        } else if (state === 'REGRESSION') {
+          if (statusBadge) statusBadge.className = 'px-3.5 py-1 rounded-full font-mono text-sm font-bold tracking-wide bg-rose-500/20 text-rose-400 border border-rose-500/30';
+          bannerContainer.className = 'rounded-xl border border-rose-500/30 bg-rose-950/10 p-5';
+        } else {
+          if (statusBadge) statusBadge.className = 'px-3.5 py-1 rounded-full font-mono text-sm font-bold tracking-wide bg-purple-500/20 text-purple-400 border border-purple-500/30';
+          bannerContainer.className = 'rounded-xl border border-purple-500/30 bg-purple-950/10 p-5';
+        }
       }
 
       const container = document.getElementById('cases-container');
-      container.innerHTML = summary.cases.map(c => {
+      if (!container) return;
+      const casesList = Array.isArray(summary.cases) ? summary.cases : [];
+
+      container.innerHTML = casesList.map(c => {
         const isPass = c.state === 'PASS';
         const isFlaky = c.state === 'FLAKY';
         const isReg = c.state === 'REGRESSION';
@@ -475,13 +533,14 @@ Try: test --suite fixtures/basic --repeat 3
           : isReg ? 'bg-rose-500/10 text-rose-400 border-rose-500/20'
           : 'bg-purple-500/10 text-purple-400 border-purple-500/20';
 
-        const executionsHtml = c.executions.map((e, idx) => {
+        const executions = Array.isArray(c.executions) ? c.executions : [];
+        const executionsHtml = executions.map((e, idx) => {
           const passFail = e.passed ? '<span class="text-emerald-400">✓ Pass</span>' : '<span class="text-rose-400">✗ Fail</span>';
           const assertionsHtml = (e.assertionResults || []).map(a => `
             <div class="flex items-start space-x-2 text-xs font-mono py-1 border-t border-slate-800/60">
               <span class="${a.passed ? 'text-emerald-400' : 'text-rose-400'} font-bold">${a.passed ? '✓' : '✗'}</span>
-              <span class="text-slate-300 font-semibold">${escapeHtml(a.assertion.type)}:</span>
-              <span class="text-slate-400 flex-1">${escapeHtml(a.message)}</span>
+              <span class="text-slate-300 font-semibold">${escapeHtml(a.assertion?.type || 'assertion')}:</span>
+              <span class="text-slate-400 flex-1">${escapeHtml(a.message || '')}</span>
             </div>
           `).join('');
 
@@ -511,11 +570,11 @@ Try: test --suite fixtures/basic --repeat 3
                 <span class="px-2.5 py-0.5 rounded text-xs font-mono font-semibold border ${badgeColor}">${c.state}</span>
               </div>
               <div class="text-xs font-mono text-slate-400">
-                ${c.passCount}/${c.executions.length} passed
+                ${c.passCount}/${executions.length} passed
               </div>
             </div>
 
-            <div class="grid grid-cols-1 md:grid-cols-${Math.min(c.executions.length, 3)} gap-3">
+            <div class="grid grid-cols-1 md:grid-cols-${Math.max(1, Math.min(executions.length, 3))} gap-3">
               ${executionsHtml}
             </div>
           </div>
@@ -525,58 +584,75 @@ Try: test --suite fixtures/basic --repeat 3
 
     async function renderInspector() {
       const container = document.getElementById('suite-inspector-content');
+      if (!container) return;
+      if (!allSuites || allSuites.length === 0) {
+        container.innerHTML = '<div class="text-slate-400 text-sm italic p-4 bg-[#13192b] border border-slate-800 rounded-xl">No test suites found.</div>';
+        return;
+      }
       container.innerHTML = '<div class="text-slate-400 text-sm animate-pulse">Loading suite definitions...</div>';
 
       const suiteCards = await Promise.all(allSuites.map(async s => {
         try {
-          const res = await fetch('/api/suite-detail?path=' + encodeURIComponent(s.path));
+          const res = await apiFetch('/api/suite-detail?path=' + encodeURIComponent(s.path));
+          if (!res.ok) return '';
           const detail = await res.json();
+          if (!detail || !Array.isArray(detail.cases)) return '';
 
-          const casesHtml = detail.cases.map(c => `
+          const casesHtml = detail.cases.map(c => {
+            const input = c.input || { path: '', content: '', exists: false };
+            const prompt = c.prompt || { path: '', content: '', exists: false };
+            const output = c.output || { path: '', content: '', exists: false };
+            const assertions = Array.isArray(c.assertions) ? c.assertions : [];
+
+            return `
             <div class="p-4 rounded-lg bg-[#0a0d14] border border-slate-800 space-y-3">
               <div class="flex items-center justify-between">
                 <span class="font-mono font-bold text-sm text-emerald-400">${escapeHtml(c.id)}</span>
-                <span class="text-xs text-slate-500 font-mono">${c.assertions.length} assertions</span>
+                <span class="text-xs text-slate-500 font-mono">${assertions.length} assertions</span>
               </div>
 
               <div class="grid grid-cols-1 lg:grid-cols-3 gap-3 text-xs font-mono">
                 <div class="p-3 rounded bg-slate-900/90 border border-slate-800">
                   <div class="text-slate-400 font-semibold mb-1 flex items-center justify-between">
-                    <span>Input: ${escapeHtml(c.input.path)}</span>
-                    ${c.input.exists ? '<span class="text-emerald-400">✓</span>' : '<span class="text-rose-400">✗ missing</span>'}
+                    <span>Input: ${escapeHtml(input.path)}</span>
+                    ${input.exists ? '<span class="text-emerald-400">✓</span>' : '<span class="text-rose-400">✗ missing</span>'}
                   </div>
-                  <pre class="text-slate-300 whitespace-pre-wrap max-h-32 overflow-y-auto">${escapeHtml(c.input.content)}</pre>
+                  <pre class="text-slate-300 whitespace-pre-wrap max-h-32 overflow-y-auto">${escapeHtml(input.content)}</pre>
                 </div>
 
                 <div class="p-3 rounded bg-slate-900/90 border border-slate-800">
                   <div class="text-slate-400 font-semibold mb-1 flex items-center justify-between">
-                    <span>Prompt: ${escapeHtml(c.prompt.path)}</span>
-                    ${c.prompt.exists ? '<span class="text-emerald-400">✓</span>' : '<span class="text-rose-400">✗ missing</span>'}
+                    <span>Prompt: ${escapeHtml(prompt.path)}</span>
+                    ${prompt.exists ? '<span class="text-emerald-400">✓</span>' : '<span class="text-rose-400">✗ missing</span>'}
                   </div>
-                  <pre class="text-slate-300 whitespace-pre-wrap max-h-32 overflow-y-auto">${escapeHtml(c.prompt.content)}</pre>
+                  <pre class="text-slate-300 whitespace-pre-wrap max-h-32 overflow-y-auto">${escapeHtml(prompt.content)}</pre>
                 </div>
 
                 <div class="p-3 rounded bg-slate-900/90 border border-slate-800">
                   <div class="text-slate-400 font-semibold mb-1 flex items-center justify-between">
-                    <span>Saved Output: ${escapeHtml(c.output.path)}</span>
-                    ${c.output.exists ? '<span class="text-emerald-400">✓</span>' : '<span class="text-rose-400">✗ missing</span>'}
+                    <span>Saved Output: ${escapeHtml(output.path)}</span>
+                    ${output.exists ? '<span class="text-emerald-400">✓</span>' : '<span class="text-rose-400">✗ missing</span>'}
                   </div>
-                  <pre class="text-slate-300 whitespace-pre-wrap max-h-32 overflow-y-auto">${escapeHtml(c.output.content)}</pre>
+                  <pre class="text-slate-300 whitespace-pre-wrap max-h-32 overflow-y-auto">${escapeHtml(output.content)}</pre>
                 </div>
               </div>
 
               <div class="pt-2 border-t border-slate-800/80">
                 <span class="text-[11px] text-slate-400 font-semibold block mb-1.5">Behavioral Assertions:</span>
                 <div class="flex flex-wrap gap-2">
-                  ${c.assertions.map(a => `
+                  ${assertions.map(a => {
+                    const val = a.value !== undefined ? (typeof a.value === 'string' ? a.value : JSON.stringify(a.value)) : a.pattern ? a.pattern : 'schema';
+                    return `
                     <span class="px-2 py-1 rounded bg-slate-800/90 border border-slate-700 text-slate-300 text-xs font-mono">
-                      <strong class="text-emerald-400">${escapeHtml(a.type)}</strong>: ${escapeHtml(a.value ? JSON.stringify(a.value) : a.pattern ? a.pattern : 'schema')}
+                      <strong class="text-emerald-400">${escapeHtml(a.type)}</strong>: ${escapeHtml(val)}
                     </span>
-                  `).join('')}
+                  `;
+                  }).join('')}
                 </div>
               </div>
             </div>
-          `).join('');
+          `;
+          }).join('');
 
           return `
             <div class="bg-[#13192b] border border-slate-800 rounded-xl p-5 space-y-4">
@@ -585,7 +661,7 @@ Try: test --suite fixtures/basic --repeat 3
                   <h3 class="font-bold text-white text-base">${escapeHtml(detail.name)}</h3>
                   <p class="text-xs font-mono text-slate-400">${escapeHtml(detail.path)}</p>
                 </div>
-                <button onclick="runSpecificSuite('${escapeHtml(detail.path)}')" class="px-3 py-1.5 rounded-md bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold">
+                <button onclick="runSpecificSuite('${escapeAttr(detail.path)}')" class="px-3 py-1.5 rounded-md bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold">
                   Execute This Suite
                 </button>
               </div>
@@ -597,18 +673,23 @@ Try: test --suite fixtures/basic --repeat 3
         }
       }));
 
-      container.innerHTML = suiteCards.filter(Boolean).join('');
+      const rendered = suiteCards.filter(Boolean).join('');
+      container.innerHTML = rendered || '<div class="text-slate-400 text-sm italic p-4 bg-[#13192b] border border-slate-800 rounded-xl">No suites could be loaded.</div>';
     }
 
     function runSpecificSuite(path) {
-      document.getElementById('run-suite-select').value = path;
+      const suiteSelect = document.getElementById('run-suite-select');
+      if (suiteSelect) {
+        suiteSelect.value = path;
+      }
       onSuiteSelectChange();
       switchTab('runner');
       executeRunSuite();
     }
 
     function setCliCmd(cmd) {
-      document.getElementById('cli-input').value = cmd;
+      const input = document.getElementById('cli-input');
+      if (input) input.value = cmd;
       runCliCommand();
     }
 
@@ -616,15 +697,18 @@ Try: test --suite fixtures/basic --repeat 3
       const input = document.getElementById('cli-input');
       const out = document.getElementById('cli-output');
       const badge = document.getElementById('cli-exit-code-badge');
+      if (!input || !out) return;
       const cmd = input.value.trim();
       if (!cmd) return;
 
-      badge.textContent = 'Running...';
-      badge.className = 'px-2 py-0.5 rounded text-[10px] bg-amber-500/20 text-amber-400 font-mono';
+      if (badge) {
+        badge.textContent = 'Running...';
+        badge.className = 'px-2 py-0.5 rounded text-[10px] bg-amber-500/20 text-amber-400 font-mono';
+      }
       out.textContent = `$ desurf ${cmd}\n...`;
 
       try {
-        const res = await fetch('/api/cli', {
+        const res = await apiFetch('/api/cli', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ command: cmd }),
@@ -636,28 +720,34 @@ Try: test --suite fixtures/basic --repeat 3
         out.textContent = display;
 
         const code = data.code ?? 0;
-        badge.textContent = 'Exit code: ' + code;
-        badge.className = code === 0
-          ? 'px-2 py-0.5 rounded text-[10px] bg-emerald-500/20 text-emerald-400 font-mono font-bold'
-          : code === 1
-          ? 'px-2 py-0.5 rounded text-[10px] bg-rose-500/20 text-rose-400 font-mono font-bold'
-          : 'px-2 py-0.5 rounded text-[10px] bg-purple-500/20 text-purple-400 font-mono font-bold';
+        if (badge) {
+          badge.textContent = 'Exit code: ' + code;
+          badge.className = code === 0
+            ? 'px-2 py-0.5 rounded text-[10px] bg-emerald-500/20 text-emerald-400 font-mono font-bold'
+            : code === 1
+            ? 'px-2 py-0.5 rounded text-[10px] bg-rose-500/20 text-rose-400 font-mono font-bold'
+            : 'px-2 py-0.5 rounded text-[10px] bg-purple-500/20 text-purple-400 font-mono font-bold';
+        }
       } catch (err) {
-        out.textContent = `$ desurf ${cmd}\nError: ${err.message}`;
-        badge.textContent = 'Exit code: 2';
-        badge.className = 'px-2 py-0.5 rounded text-[10px] bg-purple-500/20 text-purple-400 font-mono font-bold';
+        out.textContent = `$ desurf ${cmd}\nError: ${err.message || String(err)}`;
+        if (badge) {
+          badge.textContent = 'Exit code: 2';
+          badge.className = 'px-2 py-0.5 rounded text-[10px] bg-purple-500/20 text-purple-400 font-mono font-bold';
+        }
       }
     }
 
     async function executeInitSuite(e) {
       e.preventDefault();
-      const dir = document.getElementById('init-dir-input').value.trim();
+      const input = document.getElementById('init-dir-input');
       const msg = document.getElementById('init-status-msg');
+      if (!input || !msg) return;
+      const dir = input.value.trim();
       msg.className = 'text-xs p-3 rounded-lg bg-slate-800 text-slate-300 block';
       msg.textContent = 'Creating suite...';
 
       try {
-        const res = await fetch('/api/init', {
+        const res = await apiFetch('/api/init', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ dir }),
@@ -673,7 +763,7 @@ Try: test --suite fixtures/basic --repeat 3
         }
       } catch (err) {
         msg.className = 'text-xs p-3 rounded-lg bg-rose-950/50 border border-rose-800 text-rose-300 block';
-        msg.textContent = 'Failed: ' + err.message;
+        msg.textContent = 'Failed: ' + (err.message || String(err));
       }
     }
 
@@ -687,7 +777,18 @@ Try: test --suite fixtures/basic --repeat 3
         .replace(/'/g, '&#039;');
     }
 
-    loadSuitesData();
+    function escapeAttr(str) {
+      if (str === null || str === undefined) return '';
+      return String(str)
+        .replace(/'/g, "\\'")
+        .replace(/"/g, '&quot;');
+    }
+
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', loadSuitesData);
+    } else {
+      loadSuitesData();
+    }
   </script>
 </body>
 </html>
