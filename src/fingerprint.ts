@@ -14,10 +14,19 @@ import { access, constants, readFile, writeFile } from "node:fs/promises";
 
 export const META_VERSION = 1;
 
+export type CassetteSource = "seal" | "record";
+
 export type CassetteMeta = {
   version: number;
   inputSha256: string;
   promptSha256: string;
+  /**
+   * Origin of the sidecar. Optional for v0.3.0 legacy sidecars.
+   * - "seal"   → written by `desurf seal`
+   * - "record" → written by `desurf record`
+   * Missing → treat as sealed (legacy provenance present)
+   */
+  source?: CassetteSource;
 };
 
 export function sha256(text: string): string {
@@ -29,20 +38,29 @@ export function metaPathFor(outputPath: string): string {
   return `${outputPath}.desurf`;
 }
 
-export function buildMeta(inputText: string, promptText: string): CassetteMeta {
-  return {
+export function buildMeta(
+  inputText: string,
+  promptText: string,
+  source?: CassetteSource
+): CassetteMeta {
+  const meta: CassetteMeta = {
     version: META_VERSION,
     inputSha256: sha256(inputText),
     promptSha256: sha256(promptText),
   };
+  if (source) {
+    meta.source = source;
+  }
+  return meta;
 }
 
 export async function writeCassetteMeta(
   outputPath: string,
   inputText: string,
-  promptText: string
+  promptText: string,
+  source?: CassetteSource
 ): Promise<void> {
-  const meta = buildMeta(inputText, promptText);
+  const meta = buildMeta(inputText, promptText, source);
   await writeFile(metaPathFor(outputPath), JSON.stringify(meta, null, 2) + "\n", "utf8");
 }
 
@@ -56,18 +74,78 @@ async function pathExists(p: string): Promise<boolean> {
 }
 
 
+export type CassetteStateLabel = "unsealed" | "sealed" | "recorded";
+
 /**
- * Report whether a cassette has provenance metadata.
- * Does not validate hashes (use assertCassetteFresh for that).
+ * Map raw/legacy meta to a public cassette state label.
+ * Missing sidecar → unsealed.
+ * source "record" → recorded.
+ * source "seal" or missing source (legacy) → sealed.
+ */
+export function cassetteStateFromMeta(
+  meta: CassetteMeta | null
+): CassetteStateLabel {
+  if (!meta) return "unsealed";
+  if (meta.source === "record") return "recorded";
+  return "sealed";
+}
+
+/**
+ * Read and validate a sidecar if present.
+ * Returns null when missing.
+ * Throws on corrupt JSON or missing required hash fields.
+ */
+export async function readCassetteMeta(
+  outputPath: string
+): Promise<CassetteMeta | null> {
+  const metaFile = metaPathFor(outputPath);
+  if (!(await pathExists(metaFile))) {
+    return null;
+  }
+
+  let raw: unknown;
+  try {
+    raw = JSON.parse(await readFile(metaFile, "utf8"));
+  } catch {
+    throw new Error(
+      `Invalid cassette meta file (corrupt JSON): ${metaFile}`
+    );
+  }
+
+  if (
+    !raw ||
+    typeof raw !== "object" ||
+    Array.isArray(raw) ||
+    typeof (raw as CassetteMeta).inputSha256 !== "string" ||
+    typeof (raw as CassetteMeta).promptSha256 !== "string"
+  ) {
+    throw new Error(
+      `Invalid cassette meta file (missing inputSha256/promptSha256): ${metaFile}`
+    );
+  }
+
+  const meta = raw as CassetteMeta;
+  if (
+    meta.source !== undefined &&
+    meta.source !== "seal" &&
+    meta.source !== "record"
+  ) {
+    throw new Error(
+      `Invalid cassette meta file (unknown source "${String(meta.source)}"): ${metaFile}`
+    );
+  }
+  return meta;
+}
+
+/**
+ * Report cassette provenance state for an offline cassette.
+ * Does not validate hashes (use assertCassetteFresh / inspect for that).
  */
 export async function readCassetteState(
   outputPath: string
-): Promise<"unsealed" | "sealed"> {
-  const metaFile = metaPathFor(outputPath);
-  if (!(await pathExists(metaFile))) {
-    return "unsealed";
-  }
-  return "sealed";
+): Promise<CassetteStateLabel> {
+  const meta = await readCassetteMeta(outputPath);
+  return cassetteStateFromMeta(meta);
 }
 
 /**
