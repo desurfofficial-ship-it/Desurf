@@ -139,6 +139,18 @@ Provider failures (missing key, network error, HTTP 4xx/5xx, timeout, malformed 
 
 ## CI policy
 
+### GitHub Action
+
+Consumers can gate PRs with the composite Action at the repository root (`action.yml`):
+
+```yaml
+- uses: desurfofficial-ship-it/Desurf@main
+  with:
+    suite: ./desurf-suite
+```
+
+The Action runs offline `desurf test` via the published npm package and propagates exit codes **0 / 1 / 2**. It does not require `OPENROUTER_API_KEY` and does not call live providers.
+
 - Required CI is **offline and deterministic** (saved outputs only).
 - Live OpenRouter requires a real API key and is **not** part of the required CI gate.
 - Unit tests mock HTTP; they do not call the network.
