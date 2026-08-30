@@ -203,7 +203,9 @@ export async function assertCassetteFresh(
     parts.push("Input changed since output was recorded.");
   }
   parts.push(
-    "Re-record the cassette (`desurf record --force`) or restore the previous input/prompt."
+    "Refresh provenance offline with `desurf seal --force` (keeps the existing output), " +
+      "re-capture with `desurf record --force` (new provider output), " +
+      "or restore the previous input/prompt."
   );
   throw new Error(parts.join(" "));
 }
