@@ -7,10 +7,12 @@ describe("GitHub Actions workflow validation", () => {
     const yamlPath = resolve("examples/github-actions/desurf.yml");
     const content = await readFile(yamlPath, "utf8");
 
-    expect(content).not.toMatch(/branches:\s*ain\]/
-    expect(content).toMatch(/branches:\s*\[main\]/
+    // Guard against a known historical typo (missing 'm' in main)
+    expect(content).not.toMatch(/branches:\s*ain\]/);
+    expect(content).toMatch(/branches:\s*\[main\]/);
     expect(content).not.toMatch(/env:\s*[\s\S]*OPENROUTER_API_KEY/);
 
+    // Offline gate via Action or direct CLI
     expect(
       /desurf test --suite/.test(content) ||
         /uses:\s*desurfofficial-ship-it\/Desurf@/.test(content)
@@ -25,7 +27,7 @@ describe("GitHub Actions workflow validation", () => {
     const yamlPath = resolve(".github/workflows/ci.yml");
     const content = await readFile(yamlPath, "utf8");
 
-    expect(content).not.toMatch(/branches:\s*ain\]/
+    expect(content).not.toMatch(/branches:\s*ain\]/);
     expect(content).toMatch(/branches:\s*\[main/);
     expect(content).toMatch(/node dist\/cli\.js test --suite/);
   });
