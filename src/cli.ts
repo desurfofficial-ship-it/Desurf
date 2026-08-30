@@ -413,9 +413,16 @@ function parseArgs(argv: string[]): ParsedArgs {
       }
       const raw = args[++i];
       const n = parseNumericFlag(raw, "timeout-ms", { integer: true });
-      if (n < 1000) {
+      // Enforce the full valid range UNIFORMLY at CLI parse time (before any
+      // provider execution) so the verdict is identical for offline and live
+      // modes. Previously only the lower bound (1000) was checked here; the
+      // upper bound (600000) was enforced only by resolveTimeoutMs in the
+      // live-provider path, which silently clamped. That made
+      // `desurf test --timeout-ms 700000` accepted offline (exit 0) but
+      // rejected live — inconsistent (Task 13 finding). Reject loudly here.
+      if (n < 1000 || n > 600000) {
         throw new Error(
-          `--timeout-ms must be at least 1000 (got ${n}); use a larger value for slow models.`
+          `--timeout-ms must be between 1000 and 600000 milliseconds (got ${n}); use a larger value for slow models or raise the provider-side cap.`
         );
       }
       result.timeoutMs = n;
