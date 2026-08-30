@@ -11,7 +11,7 @@
  * immediately sees: input → prompt → saved output → assertions → deterministic result.
  */
 
-import { mkdir, access, constants } from "node:fs/promises";
+import { mkdir, access, constants, stat } from "node:fs/promises";
 import { resolve, basename, join } from "node:path";
 import { writeCassetteMeta } from "./fingerprint.js";
 import { atomicWriteFile } from "./fs-utils.js";
@@ -84,6 +84,13 @@ async function pathExists(p: string): Promise<boolean> {
  */
 export async function initSuite(targetDir: string): Promise<string> {
   const abs = resolve(targetDir);
+
+  if (await pathExists(abs)) {
+    const s = await stat(abs);
+    if (!s.isDirectory()) {
+      throw new Error(`Target path "${abs}" is an existing file, not a directory.`);
+    }
+  }
 
   const suiteJson = join(abs, "suite.json");
   const inputsDir = join(abs, "inputs");

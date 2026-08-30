@@ -35,7 +35,8 @@ export type CassetteMeta = {
 };
 
 export function sha256(text: string): string {
-  return createHash("sha256").update(text, "utf8").digest("hex");
+  const normalized = text.replace(/\r\n/g, "\n");
+  return createHash("sha256").update(normalized, "utf8").digest("hex");
 }
 
 /** Sidecar path for a cassette: `<outputPath>.desurf` */
@@ -109,6 +110,8 @@ export function cassetteStateFromMeta(
   return "sealed";
 }
 
+const HEX_SHA256_RE = /^[a-f0-9]{64}$/i;
+
 /**
  * Read and validate a sidecar if present.
  * Returns null when missing.
@@ -131,19 +134,31 @@ export async function readCassetteMeta(
     );
   }
 
-  if (
-    !raw ||
-    typeof raw !== "object" ||
-    Array.isArray(raw) ||
-    typeof (raw as CassetteMeta).inputSha256 !== "string" ||
-    typeof (raw as CassetteMeta).promptSha256 !== "string"
-  ) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
     throw new Error(
-      `Invalid cassette meta file (missing inputSha256/promptSha256): ${metaFile}`
+      `Invalid cassette meta file (must be a JSON object): ${metaFile}`
     );
   }
 
   const meta = raw as CassetteMeta;
+
+  if (meta.version !== META_VERSION) {
+    throw new Error(
+      `Invalid cassette meta file (unsupported version ${String(meta.version)}): ${metaFile}`
+    );
+  }
+
+  if (
+    typeof meta.inputSha256 !== "string" ||
+    !HEX_SHA256_RE.test(meta.inputSha256) ||
+    typeof meta.promptSha256 !== "string" ||
+    !HEX_SHA256_RE.test(meta.promptSha256)
+  ) {
+    throw new Error(
+      `Invalid cassette meta file (inputSha256 and promptSha256 must be 64-char hex SHA-256 hashes): ${metaFile}`
+    );
+  }
+
   if (
     meta.source !== undefined &&
     meta.source !== "seal" &&
@@ -163,8 +178,12 @@ export async function readCassetteMeta(
 export async function readCassetteState(
   outputPath: string
 ): Promise<CassetteStateLabel> {
-  const meta = await readCassetteMeta(outputPath);
-  return cassetteStateFromMeta(meta);
+  try {
+    const meta = await readCassetteMeta(outputPath);
+    return cassetteStateFromMeta(meta);
+  } catch {
+    return "unsealed";
+  }
 }
 
 /**
@@ -177,33 +196,11 @@ export async function assertCassetteFresh(
   inputText: string,
   promptText: string
 ): Promise<void> {
-  const metaFile = metaPathFor(outputPath);
-  if (!(await pathExists(metaFile))) {
+  const meta = await readCassetteMeta(outputPath);
+  if (!meta) {
     return;
   }
 
-  let raw: unknown;
-  try {
-    raw = JSON.parse(await readFile(metaFile, "utf8"));
-  } catch {
-    throw new Error(
-      `Invalid cassette meta file (corrupt JSON): ${metaFile}`
-    );
-  }
-
-  if (
-    !raw ||
-    typeof raw !== "object" ||
-    Array.isArray(raw) ||
-    typeof (raw as CassetteMeta).inputSha256 !== "string" ||
-    typeof (raw as CassetteMeta).promptSha256 !== "string"
-  ) {
-    throw new Error(
-      `Invalid cassette meta file (missing inputSha256/promptSha256): ${metaFile}`
-    );
-  }
-
-  const meta = raw as CassetteMeta;
   const inputHash = sha256(inputText);
   const promptHash = sha256(promptText);
 

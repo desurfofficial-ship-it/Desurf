@@ -89,6 +89,33 @@ function evaluateRegex(
   }
 }
 
+function deepEqual(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (a === null || typeof a !== "object" || b === null || typeof b !== "object") {
+    return false;
+  }
+  if (Array.isArray(a) !== Array.isArray(b)) return false;
+  if (Array.isArray(a) && Array.isArray(b)) {
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) {
+      if (!deepEqual(a[i], b[i])) return false;
+    }
+    return true;
+  }
+  const keysA = Object.keys(a as object);
+  const keysB = Object.keys(b as object);
+  if (keysA.length !== keysB.length) return false;
+  for (const k of keysA) {
+    if (!Object.prototype.hasOwnProperty.call(b, k)) return false;
+    if (!deepEqual((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k])) return false;
+  }
+  return true;
+}
+
+function hasOwnProperty(obj: unknown, key: string): boolean {
+  return typeof obj === "object" && obj !== null && Object.prototype.hasOwnProperty.call(obj, key);
+}
+
 /**
  * Minimal JSON-schema subset:
  * - valid JSON
@@ -102,7 +129,7 @@ function evaluateJsonSchema(
 ): AssertionResult {
   let parsed: unknown;
   try {
-    parsed = JSON.parse(output.text);
+    parsed = JSON.parse(output.text.replace(/^\uFEFF/, ""));
   } catch {
     return {
       assertion: { type: "json_schema", schema },
@@ -125,7 +152,7 @@ function evaluateJsonSchema(
     const obj = parsed as Record<string, unknown>;
     for (const key of schema.required) {
       if (typeof key !== "string") continue;
-      if (!(key in obj)) {
+      if (!hasOwnProperty(obj, key)) {
         return {
           assertion: { type: "json_schema", schema },
           passed: false,
@@ -153,11 +180,19 @@ function evaluateJsonSchema(
       const ps = propSchema as Record<string, unknown>;
 
       if ("const" in ps) {
-        if (!(propName in obj) || obj[propName] !== ps.const) {
+        if (!hasOwnProperty(obj, propName)) {
           return {
             assertion: { type: "json_schema", schema },
             passed: false,
-            message: `Property "${propName}" expected const ${JSON.stringify(ps.const)}, got ${JSON.stringify(obj[propName])}`,
+            message: `Property "${propName}" expected const ${JSON.stringify(ps.const)}, got undefined`,
+          };
+        }
+        const val = obj[propName];
+        if (!deepEqual(val, ps.const)) {
+          return {
+            assertion: { type: "json_schema", schema },
+            passed: false,
+            message: `Property "${propName}" expected const ${JSON.stringify(ps.const)}, got ${JSON.stringify(val)}`,
           };
         }
       }
@@ -170,11 +205,20 @@ function evaluateJsonSchema(
             message: `Property "${propName}" has invalid enum (must be an array)`,
           };
         }
-        if (!(propName in obj) || !ps.enum.includes(obj[propName])) {
+        if (!hasOwnProperty(obj, propName)) {
           return {
             assertion: { type: "json_schema", schema },
             passed: false,
-            message: `Property "${propName}" value ${JSON.stringify(obj[propName])} not in enum ${JSON.stringify(ps.enum)}`,
+            message: `Missing property "${propName}" with value in enum ${JSON.stringify(ps.enum)}`,
+          };
+        }
+        const val = obj[propName];
+        const match = ps.enum.some((item) => deepEqual(item, val));
+        if (!match) {
+          return {
+            assertion: { type: "json_schema", schema },
+            passed: false,
+            message: `Property "${propName}" value ${JSON.stringify(val)} not in enum ${JSON.stringify(ps.enum)}`,
           };
         }
       }

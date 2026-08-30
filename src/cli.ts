@@ -251,23 +251,49 @@ function parseArgs(argv: string[]): ParsedArgs {
     if (a === "--help" || a === "-h") {
       result.help = true;
       i++;
-    } else if (a === "--suite" && args[i + 1]) {
+    } else if (a === "--suite") {
+      if (i + 1 >= args.length || args[i + 1].startsWith("-")) {
+        throw new Error("Option --suite requires a value");
+      }
       result.suite = args[++i];
       i++;
-    } else if (a === "--case" && args[i + 1]) {
-      result.caseId = args[++i];
+    } else if (a === "--case") {
+      if (i + 1 >= args.length || args[i + 1].startsWith("-")) {
+        throw new Error("Option --case requires a value");
+      }
+      const val = args[++i];
+      if (val === "") {
+        throw new Error("Option --case requires a non-empty value");
+      }
+      result.caseId = val;
       i++;
-    } else if (a === "--repeat" && args[i + 1]) {
-      const n = Number(args[++i]);
+    } else if (a === "--repeat") {
+      if (i + 1 >= args.length || args[i + 1].startsWith("-")) {
+        throw new Error("Option --repeat requires a value");
+      }
+      const rawVal = args[++i];
+      if (!/^\d+$/.test(rawVal)) {
+        throw new Error(`--repeat must be a positive decimal integer, got: ${rawVal}`);
+      }
+      const n = Number(rawVal);
       if (!Number.isInteger(n) || n < 1) {
-        throw new Error(`--repeat must be a positive integer, got: ${args[i]}`);
+        throw new Error(`--repeat must be a positive decimal integer, got: ${rawVal}`);
+      }
+      if (n > 1000) {
+        throw new Error(`--repeat exceeds maximum allowed value (1000), got: ${rawVal}`);
       }
       result.repeat = n;
       i++;
-    } else if (a === "--provider" && args[i + 1]) {
+    } else if (a === "--provider") {
+      if (i + 1 >= args.length || args[i + 1].startsWith("-")) {
+        throw new Error("Option --provider requires a value");
+      }
       result.provider = args[++i];
       i++;
-    } else if (a === "--model" && args[i + 1]) {
+    } else if (a === "--model") {
+      if (i + 1 >= args.length || args[i + 1].startsWith("-")) {
+        throw new Error("Option --model requires a value");
+      }
       result.model = args[++i];
       i++;
     } else if (a === "--force") {
@@ -379,6 +405,11 @@ async function cmdTest(parsed: ParsedArgs): Promise<number> {
     printTestHelp();
     return 0;
   }
+  if (parsed.positional.length > 0) {
+    console.error(`Unexpected positional argument: "${parsed.positional[0]}"`);
+    printTestHelp();
+    return 2;
+  }
   if (!parsed.suite) {
     console.error("Missing required option: --suite <path>");
     printTestHelp();
@@ -438,6 +469,11 @@ async function cmdInit(parsed: ParsedArgs): Promise<number> {
     printInitHelp();
     return 0;
   }
+  if (parsed.positional.length > 1) {
+    console.error(`Unexpected extra argument: "${parsed.positional[1]}"`);
+    printInitHelp();
+    return 2;
+  }
   const dir = parsed.positional[0];
   if (!dir) {
     console.error("Missing required argument: <directory>");
@@ -459,6 +495,11 @@ async function cmdRecord(parsed: ParsedArgs): Promise<number> {
   if (parsed.help) {
     printRecordHelp();
     return 0;
+  }
+  if (parsed.positional.length > 0) {
+    console.error(`Unexpected positional argument: "${parsed.positional[0]}"`);
+    printRecordHelp();
+    return 2;
   }
   if (!parsed.suite) {
     console.error("Missing required option: --suite <path>");
@@ -529,6 +570,11 @@ async function cmdSeal(parsed: ParsedArgs): Promise<number> {
     printSealHelp();
     return 0;
   }
+  if (parsed.positional.length > 0) {
+    console.error(`Unexpected positional argument: "${parsed.positional[0]}"`);
+    printSealHelp();
+    return 2;
+  }
   if (!parsed.suite) {
     console.error("Missing required option: --suite <path>");
     printSealHelp();
@@ -565,6 +611,11 @@ async function cmdInspect(parsed: ParsedArgs): Promise<number> {
   if (parsed.help) {
     printInspectHelp();
     return 0;
+  }
+  if (parsed.positional.length > 0) {
+    console.error(`Unexpected positional argument: "${parsed.positional[0]}"`);
+    printInspectHelp();
+    return 2;
   }
   if (!parsed.suite) {
     console.error("Missing required option: --suite <path>");
