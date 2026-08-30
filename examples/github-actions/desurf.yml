@@ -8,8 +8,9 @@
 #   2 = ERROR (including stale provenance)
 #
 # Pins:
-# - Action ref: use @main (or a full commit SHA). Do not invent tags that do not exist.
-# - npm package: pin with `version:` (never "latest")
+# - Action ref: @main is the development tip; prefer a full commit SHA in production.
+#   A stable v0.4 Action tag will be created only when the v0.4 release is cut (not yet).
+# - npm package: pin with `version:` (never "latest"); default/current stable is 0.3.0
 
 name: Desurf offline gate
 

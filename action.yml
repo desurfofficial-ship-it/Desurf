@@ -12,6 +12,7 @@
 # is offline: no live provider, no OPENROUTER_API_KEY, no record command.
 
 name: Desurf Offline Gate
+author: desurfofficial-ship-it
 description: >
   Run offline Desurf regression tests against a committed suite.
   Propagates Desurf exit codes 0/1/2 so GitHub Actions fails the job on
