@@ -146,8 +146,8 @@ Desurf is designed for offline CI gating. Exit codes fail the job automatically:
 ```
 
 **Pins are independent:**
-- **Action ref** (`uses: ...@ref`) selects the Action definition. Prefer a full **commit SHA** for supply-chain reproducibility. Use only refs that exist (e.g. `@main`); do not invent tags.
-- **`version`** selects the published **`@desurfofficial-ship-it/desurf`** npm package the Action installs. It does **not** run the Action checkout’s source tree.
+- **Action ref** (`uses: ...@ref`) selects the Action definition (composite steps in this repository). Prefer a full **commit SHA** for production supply-chain pinning. `@main` tracks development and can change at any time. A stable **`v0.4` Action tag** is planned for the v0.4 release and is **not** created until that release is cut—do not invent tags that do not exist yet.
+- **`version`** selects the published **`@desurfofficial-ship-it/desurf`** npm package the Action installs (default `0.3.0` until a newer package is published). It does **not** run the Action checkout’s source tree.
 
 **Network vs offline:** npm install needs network once. The Desurf **test** gate is offline (no live provider, no `OPENROUTER_API_KEY`, no record).
 
