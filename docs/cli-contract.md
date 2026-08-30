@@ -144,12 +144,17 @@ Provider failures (missing key, network error, HTTP 4xx/5xx, timeout, malformed 
 Consumers can gate PRs with the composite Action at the repository root (`action.yml`):
 
 ```yaml
-- uses: desurfofficial-ship-it/Desurf@main
+- uses: desurfofficial-ship-it/Desurf@main   # or full commit SHA; only existing refs
   with:
     suite: ./desurf-suite
+    version: "0.3.0"   # published npm package pin (never "latest")
 ```
 
-The Action runs offline `desurf test` via the published npm package and propagates exit codes **0 / 1 / 2**. It does not require `OPENROUTER_API_KEY` and does not call live providers.
+- Action ref and npm `version` are **independent** pins; the Action installs the published package, not the Action checkout source.
+- npm install may use the network; the **test** invocation is offline (no provider / no `OPENROUTER_API_KEY` / no record).
+- Exit codes **0 / 1 / 2** are propagated unchanged.
+- Install is isolated to a temporary directory (consumer workspace package files are not modified).
+- Stale sealed/recorded cassettes → exit **2**; refresh with `desurf seal --force` or `desurf record --force`.
 
 - Required CI is **offline and deterministic** (saved outputs only).
 - Live OpenRouter requires a real API key and is **not** part of the required CI gate.

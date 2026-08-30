@@ -7,19 +7,15 @@ describe("GitHub Actions workflow validation", () => {
     const yamlPath = resolve("examples/github-actions/desurf.yml");
     const content = await readFile(yamlPath, "utf8");
 
-    // Ensure it does not have the typo 'branches: ain]'
-    expect(content).not.toMatch(/branches:\s*ain\]/);
-
-    // Verify correct branches array syntax
-    expect(content).toMatch(/branches:\s*\[main\]/);
-
-    // Verify offline-only, no OPENROUTER_API_KEY set in environment
+    expect(content).not.toMatch(/branches:\s*ain\]/
+    expect(content).toMatch(/branches:\s*\[main\]/
     expect(content).not.toMatch(/env:\s*[\s\S]*OPENROUTER_API_KEY/);
 
-    // Verify workflow runs desurf test
-    expect(content).toMatch(/desurf test --suite/);
+    expect(
+      /desurf test --suite/.test(content) ||
+        /uses:\s*desurfofficial-ship-it\/Desurf@/.test(content)
+    ).toBe(true);
 
-    // Verify basic YAML structure: name, on, jobs
     expect(content).toMatch(/^name:\s*.+/m);
     expect(content).toMatch(/^on:\s*/m);
     expect(content).toMatch(/^jobs:\s*/m);
@@ -29,7 +25,7 @@ describe("GitHub Actions workflow validation", () => {
     const yamlPath = resolve(".github/workflows/ci.yml");
     const content = await readFile(yamlPath, "utf8");
 
-    expect(content).not.toMatch(/branches:\s*ain\]/);
+    expect(content).not.toMatch(/branches:\s*ain\]/
     expect(content).toMatch(/branches:\s*\[main/);
     expect(content).toMatch(/node dist\/cli\.js test --suite/);
   });
