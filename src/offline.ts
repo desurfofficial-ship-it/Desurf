@@ -30,6 +30,16 @@ const ALLOWED_FIELDS: Record<string, Set<string>> = {
   json_schema: new Set(["type", "schema"]),
 };
 
+const SUPPORTED_PROPERTY_TYPES = new Set([
+  "string",
+  "number",
+  "integer",
+  "boolean",
+  "object",
+  "array",
+  "null",
+]);
+
 function assertNoUnknownFields(raw: RawAssertion): void {
   const allowed = ALLOWED_FIELDS[raw.type];
   if (!allowed) {
@@ -48,6 +58,11 @@ function assertNoUnknownFields(raw: RawAssertion): void {
  * Validate the supported json_schema subset at load time so unsupported or
  * malformed schema fragments fail fast (exit 2) instead of silently becoming
  * no-op assertions that pass anything (silent-green).
+ *
+ * v0.4.3: property-level "type" is now enforced (string/number/integer/
+ * boolean/object/array/null, recursively for nested objects). Unknown or
+ * unsupported property types are rejected here so a schema typo cannot
+ * silently disable the check (false PASS).
  */
 function validateJsonSchemaShape(schema: Record<string, unknown>): void {
   if (schema.type !== undefined && schema.type !== "object") {
@@ -84,24 +99,91 @@ function validateJsonSchemaShape(schema: Record<string, unknown>): void {
         );
       }
       const ps = propSchema as Record<string, unknown>;
-      if ("const" in ps && (typeof ps.const === "object" || ps.const === null)) {
+      validatePropertySchema(ps, propName);
+    }
+  }
+}
+
+/**
+ * Validate one property schema (and, recursively, nested object properties
+ * and array item schemas). Shared by the top-level properties pass and the
+ * nested traversal so unsupported types fail at load time everywhere.
+ */
+function validatePropertySchema(
+  ps: Record<string, unknown>,
+  propName: string
+): void {
+  if ("type" in ps) {
+    if (
+      typeof ps.type !== "string" ||
+      !SUPPORTED_PROPERTY_TYPES.has(ps.type)
+    ) {
+      throw new Error(
+        `json_schema: property "${propName}" has unsupported type ${JSON.stringify(
+          ps.type
+        )} (supported: string, number, integer, boolean, object, array, null)`
+      );
+    }
+  }
+  if ("const" in ps && (typeof ps.const === "object" || ps.const === null)) {
+    throw new Error(
+      `json_schema: property "${propName}" const must be a primitive (objects/arrays compare by reference and can never match parsed JSON)`
+    );
+  }
+  if ("enum" in ps) {
+    if (!Array.isArray(ps.enum)) {
+      throw new Error(
+        `json_schema: property "${propName}" enum must be an array`
+      );
+    }
+    if (ps.enum.some((v) => typeof v === "object" && v !== null)) {
+      throw new Error(
+        `json_schema: property "${propName}" enum entries must be primitives (objects/arrays compare by reference)`
+      );
+    }
+  }
+  if (ps.type === "object") {
+    if (ps.properties !== undefined) {
+      if (
+        typeof ps.properties !== "object" ||
+        ps.properties === null ||
+        Array.isArray(ps.properties)
+      ) {
         throw new Error(
-          `json_schema: property "${propName}" const must be a primitive (objects/arrays compare by reference and can never match parsed JSON)`
+          `json_schema: property "${propName}" "properties" must be an object`
         );
       }
-      if ("enum" in ps) {
-        if (!Array.isArray(ps.enum)) {
+      for (const [nestedName, nestedSchema] of Object.entries(ps.properties)) {
+        if (!nestedSchema || typeof nestedSchema !== "object" || Array.isArray(nestedSchema)) {
           throw new Error(
-            `json_schema: property "${propName}" enum must be an array`
+            `json_schema: property "${propName}.${nestedName}" must be an object`
           );
         }
-        if (ps.enum.some((v) => typeof v === "object" && v !== null)) {
+        validatePropertySchema(nestedSchema as Record<string, unknown>, `${propName}.${nestedName}`);
+      }
+    }
+    if (ps.required !== undefined) {
+      if (!Array.isArray(ps.required)) {
+        throw new Error(
+          `json_schema: property "${propName}" "required" must be an array of strings`
+        );
+      }
+      for (const key of ps.required) {
+        if (typeof key !== "string") {
           throw new Error(
-            `json_schema: property "${propName}" enum entries must be primitives (objects/arrays compare by reference)`
+            `json_schema: property "${propName}" "required" entries must be strings`
           );
         }
       }
     }
+  }
+  if (ps.type === "array" && ps.items !== undefined) {
+    if (typeof ps.items !== "object" || ps.items === null || Array.isArray(ps.items)) {
+      throw new Error(
+        `json_schema: property "${propName}" "items" must be an object (single-schema form)`
+      );
+    }
+    validatePropertySchema(ps.items as Record<string, unknown>, `${propName}[].items`);
   }
 }
 
