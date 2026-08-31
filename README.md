@@ -2,6 +2,8 @@
 
 **Offline-first CLI for testing AI prompt behavior and detecting regressions.**
 
+![CI](https://github.com/desurfofficial-ship-it/Desurf/actions/workflows/ci.yml/badge.svg)
+
 Version **0.4.1**
 
 Desurf lets developers define expected AI behavior as testable contracts and detect behavioral regressions when model outputs change.
@@ -38,7 +40,7 @@ Every test case has an output cassette. That cassette is in one of three states:
 |-------|---------------------|------------|------------------------------|
 | **UNSEALED** | output only (no `.desurf`) | run normally | **not** detected (legacy-compatible) |
 | **SEALED** | output + `.desurf` from `desurf seal` | run normally | detected → **ERROR (exit 2)** |
-| **RECORDED** | output + `.desurf` from `desurf record` | run normally | detected → **ERROR (exit 2)** |
+| **RECORDED** | output + `.desurf` from `desurf record` | run normally | detected → **WARNING** (soft; run stays green unless assertions fail) |
 
 - **UNSEALED** — useful for quick experiments or v0.2/v0.3 suites that never adopted provenance. Safe to keep; you simply will not catch stale fixtures.
 - **SEALED** — you already have a trusted response file (from a prior model run, a hand-authored golden file, or a teammate). `desurf seal` fingerprints the current input and prompt **locally**. No API key, no network.
@@ -80,7 +82,9 @@ desurf test --suite ./my-suite
 
 **After changing a prompt or input** (sealed/recorded suite):
 
-1. `desurf test` fails with **ERROR (exit 2)** — prompt/input no longer matches the cassette fingerprints.
+1. `desurf test` behaves differently depending on the cassette origin:
+   - **Sealed cassette**: fails with **ERROR (exit 2)** — the prompt/input no longer matches the cassette fingerprints, so Desurf refuses to treat the result as a contract verdict.
+   - **Recorded cassette**: reports a **WARNING** and still evaluates the current assertions against the drifted baseline, showing a saved-vs-evaluated diff. The run stays green (exit 0) unless the assertions themselves fail. This keeps the iterate → re-record loop from crying wolf on every intentional prompt edit.
 2. Choose an explicit remediation (Desurf never auto-repairs):
    - **Keep the existing output** and re-fingerprint current prompt/input (offline, no API key):
      `desurf seal --suite ./my-suite --force`
@@ -94,9 +98,9 @@ desurf test --suite ./my-suite
 |------|---------|----------------|
 | **0** | PASS | Contract held |
 | **1** | REGRESSION / FLAKY | Output was evaluated; assertions failed (behavior changed) |
-| **2** | ERROR | Could not trust or evaluate the cassette (stale provenance, missing files, bad config, provider failure) |
+| **2** | ERROR | Could not trust or evaluate the cassette (stale sealed provenance, missing files, bad config, provider failure) |
 
-Stale prompt/input is **not** a regression: the saved output no longer corresponds to the files under test, so Desurf refuses to treat the result as a contract verdict.
+Stale **sealed** prompt/input is **not** a regression: the saved output no longer corresponds to the files under test, so Desurf refuses to treat the result as a contract verdict. Stale **recorded** prompt/input is a soft **WARNING** (the cassette was live-captured and is expected to be refreshed) — the run stays green unless assertions fail.
 
 ## How offline testing works
 
@@ -132,6 +136,7 @@ desurf test (offline) ← evaluates behavioral contract deterministically
 - `desurf record --suite <path> --provider <name> [--model id] [--force] [--case id]` — capture live provider outputs
 - `desurf seal --suite <path> [--force] [--case id]` — establish offline provenance from existing output files
 - `desurf inspect --suite <path> [--json] [--case id]` — inspect cassette provenance status (read-only)
+- `desurf watch --suite <path> [--repeat N] [--provider <name>]` — re-run the suite whenever its files change
 
 Exit codes: **0** PASS · **1** REGRESSION/FLAKY · **2** ERROR
 
@@ -167,7 +172,7 @@ Desurf is designed for offline CI gating. Exit codes fail the job automatically:
 
 **Network vs offline:** npm install needs network once. The Desurf **test** gate is offline (no live provider, no `OPENROUTER_API_KEY`, no record).
 
-**Stale cassettes:** sealed/recorded prompt or input drift → exit **2**. Refresh offline with `desurf seal --force` (keeps output) or re-capture with `desurf record --force`.
+**Stale cassettes:** sealed prompt/input drift → exit **2**. Recorded prompt/input drift → soft **WARNING** (run stays green unless assertions fail). Refresh offline with `desurf seal --force` (keeps output) or re-capture with `desurf record --force`.
 
 - Propagates exit codes **0 / 1 / 2**.
 - Installs into a temporary directory (does not modify consumer `package.json` / lockfile / `node_modules`).
