@@ -452,9 +452,15 @@ export async function verifyCassetteOutput(
     return;
   }
   if (meta.outputSha256 !== sha256Normalized(outputText)) {
+    // v0.4.3: wording is cassette-source aware. A tampered *recorded*
+    // cassette says "modified after recording"; a sealed one says
+    // "modified after sealing". The old text always said "sealing",
+    // which was misleading for record-sourced cassettes.
+    const sourceLabel =
+      meta.source === "record" ? "modified after recording" : "modified after sealing";
     throw new Error(
-      `Saved output was modified after sealing (outputSha256 mismatch): ${outputPath}. ` +
-        `The assertions would run against bytes that no longer match the sealed cassette. ` +
+      `Saved output was ${sourceLabel} (outputSha256 mismatch): ${outputPath}. ` +
+        `The assertions would run against bytes that no longer match the ${meta.source === "record" ? "recorded" : "sealed"} cassette. ` +
         `Restore the original output, or if the change is intentional refresh provenance ` +
         `with \`desurf seal --force\` (keep edited output) or \`desurf record --force\` (new provider output).`
     );
