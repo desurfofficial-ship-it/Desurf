@@ -64,6 +64,21 @@ export type TestResult = {
    * produced a different output. Shown as a unified diff.
    */
   diff?: string;
+  /**
+   * Structured drift metadata for a soft-drift execution (recorded
+   * baseline whose prompt/input changed since capture). Populated by the
+   * runner when it detects soft cassette drift; the human-readable
+   * warning string stays in `warnings`. Lets --json consumers see that
+   * the contract passed against a drifted baseline and exactly which
+   * side (prompt/input) changed.
+   */
+  drift?: {
+    state: "soft";
+    promptStale: boolean;
+    inputStale: boolean;
+    cassetteState: "recorded";
+    message: string;
+  };
 };
 
 /**

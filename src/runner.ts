@@ -54,6 +54,9 @@ async function runOneExecution(
     ]);
 
     let driftWarning: string | undefined;
+    let driftMeta:
+      | { state: "soft"; promptStale: boolean; inputStale: boolean; cassetteState: "recorded"; message: string }
+      | undefined;
     let savedOutput: string | undefined;
 
     // Stale-fixture check only applies offline (saved cassette evaluation).
@@ -74,10 +77,24 @@ async function runOneExecution(
         if (freshness.inputStale) {
           parts.push("Input changed since output was recorded.");
         }
+        // The warning text itself carries no "WARNING:" prefix — the
+        // formatter adds exactly one prefix per line. (v0.4.3: previously
+        // the message embedded a second "WARNING:" prefix, which produced
+        // duplicated prefixes in human output.)
         driftWarning =
           parts.join(" ") +
-          " WARNING: evaluating against a drifted recorded baseline. " +
+          " Evaluating against a drifted recorded baseline. " +
           "Re-capture with `desurf record --force` or re-seal with `desurf seal --force` to refresh.";
+        // Structured drift metadata so --json consumers can tell a
+        // contract PASS from a clean PASS: the contract passed, but the
+        // baseline drifted (and exactly which side changed).
+        driftMeta = {
+          state: "soft",
+          promptStale: freshness.promptStale,
+          inputStale: freshness.inputStale,
+          cassetteState: "recorded",
+          message: driftWarning,
+        };
       } else {
         // Hard drift (sealed/legacy): refuse to evaluate — ERROR (exit 2).
         await assertCassetteFresh(testCase.outputPath, inputText, promptText);
@@ -114,6 +131,7 @@ async function runOneExecution(
 
     if (driftWarning) {
       result.warnings = [driftWarning];
+      result.drift = driftMeta;
     }
 
     // Diff on regression (P5): when the evaluated output differs from the
