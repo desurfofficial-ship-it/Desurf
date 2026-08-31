@@ -34,16 +34,16 @@ describe("CLI", { timeout: 25000 }, () => {
     await rm(dir, { recursive: true, force: true });
   });
 
-  it("--version prints 0.4.0 and exits 0", async () => {
+  it("--version prints 0.4.1 and exits 0", async () => {
     const r = await runCli(["--version"]);
     expect(r.code).toBe(0);
-    expect(r.stdout.trim()).toBe("0.4.0");
+    expect(r.stdout.trim()).toBe("0.4.1");
   });
 
-  it("-v prints 0.4.0 and exits 0", async () => {
+  it("-v prints 0.4.1 and exits 0", async () => {
     const r = await runCli(["-v"]);
     expect(r.code).toBe(0);
-    expect(r.stdout.trim()).toBe("0.4.0");
+    expect(r.stdout.trim()).toBe("0.4.1");
   });
 
   it("--version after command exits 2 with clear error message", async () => {

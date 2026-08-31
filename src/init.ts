@@ -11,7 +11,7 @@
  * immediately sees: input → prompt → saved output → assertions → deterministic result.
  */
 
-import { mkdir, access, constants, stat } from "node:fs/promises";
+import { mkdir, access, constants, stat, writeFile } from "node:fs/promises";
 import { resolve, basename, join } from "node:path";
 import { writeCassetteMeta } from "./fingerprint.js";
 import { atomicWriteFile } from "./fs-utils.js";
@@ -112,13 +112,29 @@ export async function initSuite(targetDir: string): Promise<string> {
   }
 
   await mkdir(abs, { recursive: true });
+
+  const name = basename(abs) || "my-suite";
+
+  // Exclusive claim: O_EXCL create of suite.json is the concurrency gate.
+  // Check-then-act on the directory is racy — two `desurf init` processes
+  // can both pass the existence checks and both report success. Creating
+  // suite.json with flag "wx" (O_CREAT|O_EXCL) makes exactly one winner;
+  // every other initializer fails with the same "already exists" error.
+  try {
+    await writeFile(suiteJson, buildSuiteJson(name), { encoding: "utf8", flag: "wx" });
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "EEXIST") {
+      throw new Error(
+        `Refusing to overwrite existing suite: ${suiteJson} already exists. Choose an empty directory or remove the existing suite.`
+      );
+    }
+    throw err;
+  }
+
   await mkdir(inputsDir, { recursive: true });
   await mkdir(promptsDir, { recursive: true });
   await mkdir(outputsDir, { recursive: true });
 
-  const name = basename(abs) || "my-suite";
-
-  await atomicWriteFile(suiteJson, buildSuiteJson(name), "utf8");
   await atomicWriteFile(join(inputsDir, "support-request.txt"), INPUT_TXT, "utf8");
   await atomicWriteFile(join(promptsDir, "classify.txt"), PROMPT_TXT, "utf8");
   const outputPath = join(outputsDir, "classify.json");

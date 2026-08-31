@@ -34,10 +34,10 @@ describe("GitHub Action (action.yml) — offline CI gate", () => {
     expect(content).toMatch(/using:\s*composite/);
   });
 
-  it("pins npm package version by default (0.4.0) and rejects latest", async () => {
+  it("pins npm package version by default (0.4.1) and rejects latest", async () => {
     const content = await readFile(resolve("action.yml"), "utf8");
     expect(content).toMatch(/version:/);
-    expect(content).toMatch(/default:\s*"0\.4\.0"/);
+    expect(content).toMatch(/default:\s*"0\.4\.1"/);
     expect(content).toMatch(/Do not use ['"]latest['"]/i);
     expect(content).toMatch(/VER.*=.*"latest"|got '\$\{VER/);
   });
@@ -74,13 +74,13 @@ describe("GitHub Action (action.yml) — offline CI gate", () => {
     expect(content).toMatch(/exit 2/);
   });
 
-  it("example workflow pins version 0.4.0 and uses the Action", async () => {
+  it("example workflow pins version 0.4.1 and uses the Action", async () => {
     const content = await readFile(
       resolve("examples/github-actions/desurf.yml"),
       "utf8"
     );
     expect(content).toMatch(/uses:\s*desurfofficial-ship-it\/Desurf@/);
-    expect(content).toMatch(/version:\s*"0\.4\.0"/);
+    expect(content).toMatch(/version:\s*"0\.4\.1"/);
     expect(content).toMatch(/suite:\s*.+/);
     expect(content).not.toMatch(/OPENROUTER_API_KEY\s*:/);
   });

@@ -2,7 +2,7 @@
 
 **Offline-first CLI for testing AI prompt behavior and detecting regressions.**
 
-Version **0.4.0**
+Version **0.4.1**
 
 Desurf lets developers define expected AI behavior as testable contracts and detect behavioral regressions when model outputs change.
 
@@ -25,7 +25,7 @@ The published package name is **`@desurfofficial-ship-it/desurf`**. The CLI bina
 ```bash
 desurf init ./my-suite
 desurf test --suite ./my-suite
-desurf --version   # 0.4.0
+desurf --version   # 0.4.1
 ```
 
 `desurf init` scaffolds a **sealed** example suite (output + `.desurf` provenance) so the first `desurf test` is fully offline and protected against prompt/input drift.
@@ -158,12 +158,12 @@ Desurf is designed for offline CI gating. Exit codes fail the job automatically:
 - uses: desurfofficial-ship-it/Desurf@main   # or a full commit SHA; do not invent tags
   with:
     suite: ./desurf-suite
-    version: "0.4.0"   # npm package pin (never "latest")
+    version: "0.4.1"   # npm package pin (never "latest")
 ```
 
 **Pins are independent:**
 - **Action ref** (`uses: ...@ref`) selects the Action definition (composite steps in this repository). Prefer a full **commit SHA** for production supply-chain pinning. `@main` tracks development and can change at any time. A stable **`v0.4` Action tag** is planned for the v0.4 release and is **not** created until that release is cut—do not invent tags that do not exist yet.
-- **`version`** selects the published **`@desurfofficial-ship-it/desurf`** npm package the Action installs (default `0.4.0` until a newer package is published). It does **not** run the Action checkout’s source tree.
+- **`version`** selects the published **`@desurfofficial-ship-it/desurf`** npm package the Action installs (default `0.4.1`). It does **not** run the Action checkout’s source tree.
 
 **Network vs offline:** npm install needs network once. The Desurf **test** gate is offline (no live provider, no `OPENROUTER_API_KEY`, no record).
 

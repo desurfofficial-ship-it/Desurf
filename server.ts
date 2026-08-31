@@ -53,7 +53,7 @@ async function discoverSuites(dir: string, results: string[] = []): Promise<stri
 
 // Health check
 app.get("/api/health", (_req, res) => {
-  res.json({ status: "ok", app: "Desurf", version: "0.4.0" });
+  res.json({ status: "ok", app: "Desurf", version: "0.4.1" });
 });
 
 // Environment configuration check

@@ -100,6 +100,28 @@ describe("desurf init", () => {
     await expect(initSuite(target)).rejects.toThrow(/Refusing/i);
   });
 
+  it("concurrent init: exactly one initializer succeeds", async () => {
+    const target = join(dir, "race-suite");
+    const N = 12;
+    const results = await Promise.allSettled(
+      Array.from({ length: N }, () => initSuite(target))
+    );
+    const fulfilled = results.filter((r) => r.status === "fulfilled");
+    const rejected = results.filter((r) => r.status === "rejected");
+    expect(fulfilled.length).toBe(1);
+    expect(rejected.length).toBe(N - 1);
+    for (const r of rejected) {
+      expect((r as PromiseRejectedResult).reason.message).toMatch(
+        /Refusing|already exists/i
+      );
+    }
+    const suite = JSON.parse(
+      await readFile(join(target, "suite.json"), "utf8")
+    );
+    expect(suite.cases).toHaveLength(1);
+    await access(join(target, "outputs", "classify.json"));
+  });
+
   it("loadSuite accepts generated suite", async () => {
     const target = join(dir, "load-suite");
     await initSuite(target);
