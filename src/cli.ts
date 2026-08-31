@@ -38,7 +38,7 @@ function getVersion(): string {
   } catch {
     // fall through
   }
-  return "0.4.1";
+  return "0.4.3";
 }
 
 function printRootHelp(): void {
@@ -214,7 +214,7 @@ Exit codes:
 }
 
 function printWatchHelp(): void {
-  console.log(`desurf watch \u2014 re-run a suite whenever its files change
+  console.log(`desurf watch — re-run a suite whenever its files change
 
 Usage:
   desurf watch --suite <path> [options]
@@ -225,7 +225,7 @@ Options:
   --repeat <n>         Execute each case N times (default 1; max 1000, or 100 with live providers)
   --provider <name>    offline (default) | openrouter | openai | anthropic | gemini
   --model <id>         Model id for live providers (uses provider default if omitted)
-  --temperature <n>    Sampling temperature 0\u20132 (default 0 = deterministic)
+  --temperature <n>    Sampling temperature 0–2 (default 0 = deterministic)
   --seed <n>           Best-effort determinism seed (OpenAI-compatible endpoints)
   --max-tokens <n>     Cap output length (omitted = provider default)
   --timeout-ms <n>     Per-request deadline in ms (default 30000; min 1000; max 600000)
@@ -237,21 +237,27 @@ Options:
 Notes:
   - Watches the suite directory (inputs/, prompts/, outputs/, suite.json)
     and re-runs \`desurf test\` on every change, debounced.
-  - The iteration loop (tweak prompt \u2192 watch re-runs \u2192 see diff) is the
+  - The iteration loop (tweak prompt → watch re-runs → see diff) is the
     fastest way to use Desurf day-to-day.
-  - Recorded baselines drift softly by design: a changed prompt re-evaluates
-    against the current assertions and shows a diff, keeping the run green
-    unless assertions fail.
+  - Cassette drift semantics depend on how the cassette was created:
+      SEALED   — \`desurf seal\` (or a legacy sidecar): prompt/input drift is
+                HARD drift → the run refuses to evaluate and exits 2.
+      RECORDED — \`desurf record\`: prompt/input drift is SOFT drift → the
+                run stays green (exit 0 unless assertions fail), re-evaluates
+                the current assertions against the drifted baseline, shows a
+                diff, and prints a WARNING so the drift is never silent.
+      UNSEALED — no .desurf sidecar: no provenance; prompt/input drift
+                cannot be detected at all (run \`desurf seal\` to enable it).
   - Ctrl+C stops the watcher with exit 0.
 
 Exit codes:
-  Same contract as \`desurf test\`: 0 PASS \u00b7 1 REGRESSION/FLAKY \u00b7 2 ERROR
+  Same contract as \`desurf test\`: 0 PASS · 1 REGRESSION/FLAKY · 2 ERROR
   (reported per run; the watcher itself always exits 0 on stop).
 `);
 }
 
 function printInspectHelp(): void {
-  console.log(`desurf inspect \u2014 report cassette provenance status (read-only)
+  console.log(`desurf inspect — report cassette provenance status (read-only)
 
 Usage:
   desurf inspect --suite <path> [options]
@@ -534,7 +540,7 @@ function parseArgs(argv: string[]): ParsedArgs {
 
 function formatCase(c: CaseReliability, verbose: boolean): string {
   const total = c.executions.length;
-  const mark = c.state === "PASS" ? "\u2713" : "\u2717";
+  const mark = c.state === "PASS" ? "✓" : "✗";
 
   let body = `${mark} ${c.caseId}\n  ${c.state}`;
   if (total > 1) {
@@ -616,6 +622,11 @@ function summaryToJson(summary: RunSummary): object {
       flaky: summary.flaky,
       regression: summary.regression,
       errors: summary.errors,
+      // v0.4.3: expose the root warnings count so a soft-drift run is
+      // visibly not a clean PASS (previously only case-level data existed
+      // and the machine-readable verdict could say PASS while the human
+      // output said WARNING).
+      warnings: summary.warnings,
     },
     cases: summary.cases.map((c) => ({
       id: c.caseId,
@@ -624,6 +635,11 @@ function summaryToJson(summary: RunSummary): object {
       passCount: c.passCount,
       failCount: c.failCount,
       errorCount: c.errorCount,
+      // v0.4.3: per-case warning count mirrors the human verdict.
+      warnings: c.executions.reduce(
+        (n, e) => n + (e.warnings ? e.warnings.length : 0),
+        0
+      ),
       executions: c.executions.map((e) => ({
         passed: e.passed,
         error: e.error ?? null,
@@ -634,6 +650,13 @@ function summaryToJson(summary: RunSummary): object {
             message: a.message,
           })),
         outputPreview: e.outputPreview ?? null,
+        // v0.4.3: per-execution warnings (soft drift) and the regression
+        // diff are decision-relevant; the human output shows both, so the
+        // JSON verdict must too. Soft drift can no longer appear as an
+        // unexplained clean PASS in JSON.
+        warnings: e.warnings ?? [],
+        drift: e.drift ?? null,
+        diff: e.diff ?? null,
       })),
     })),
   };
@@ -717,7 +740,10 @@ async function cmdTest(parsed: ParsedArgs): Promise<number> {
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     if (parsed.json) {
-      console.error(JSON.stringify({ error: msg }));
+      // v0.4.3: when --json is requested, structured command errors must
+      // be valid JSON on STDOUT (not stderr) so `desurf test --json | jq`
+      // always consumes valid JSON. Exit code stays 2.
+      console.log(JSON.stringify({ status: "ERROR", error: msg }, null, 2));
     } else {
       console.error("Desurf error:", msg);
     }
@@ -814,11 +840,11 @@ async function cmdRecord(parsed: ParsedArgs): Promise<number> {
       force: parsed.force,
     });
 
-    console.log(`Desurf record \u2014 suite "${summary.suiteName}"\n`);
+    console.log(`Desurf record — suite "${summary.suiteName}"\n`);
     let anyError = false;
     for (const r of summary.results) {
       const mark =
-        r.status === "recorded" ? "\u2713" : r.status === "skipped" ? "\u00b7" : "\u2717";
+        r.status === "recorded" ? "✓" : r.status === "skipped" ? "·" : "✗";
       console.log(`${mark} ${r.caseId}: ${r.status}`);
       console.log(`  ${r.message}`);
       console.log();
@@ -874,11 +900,11 @@ async function cmdSeal(parsed: ParsedArgs): Promise<number> {
       force: parsed.force,
     });
 
-    console.log(`Desurf seal \u2014 suite "${summary.suiteName}"\n`);
+    console.log(`Desurf seal — suite "${summary.suiteName}"\n`);
     let anyError = false;
     for (const r of summary.results) {
       const mark =
-        r.status === "sealed" ? "\u2713" : r.status === "skipped" ? "\u00b7" : "\u2717";
+        r.status === "sealed" ? "✓" : r.status === "skipped" ? "·" : "✗";
       console.log(`${mark} ${r.caseId}: ${r.status}`);
       console.log(`  ${r.message}`);
       console.log();
@@ -972,7 +998,7 @@ async function cmdInspect(parsed: ParsedArgs): Promise<number> {
       return anyInvalid ? 2 : 0;
     }
 
-    console.log(`Desurf inspect \u2014 suite "${summary.suiteName}"\n`);
+    console.log(`Desurf inspect — suite "${summary.suiteName}"\n`);
     let anyInvalid = false;
     for (const c of summary.cases) {
       const state = c.cassetteState.toUpperCase();
@@ -984,27 +1010,27 @@ async function cmdInspect(parsed: ParsedArgs): Promise<number> {
           : c.outputFresh
             ? "fresh"
             : "STALE (modified after seal/record)";
-      console.log(`\u2022 ${c.caseId}`);
+      console.log(`• ${c.caseId}`);
       console.log(`  cassette: ${state}`);
       console.log(`  output:   ${c.outputPath}`);
       console.log(`  meta:     ${c.metaPresent ? c.metaPath : "(none)"}`);
       if (c.provenanceStatus === "unsealed") {
-        console.log(`  status:   UNSEALED \u2014 no provenance; prompt/input drift cannot be detected`);
+        console.log(`  status:   UNSEALED — no provenance; prompt/input drift cannot be detected`);
         console.log(`  next:     run \`desurf seal --suite <path>\` to establish offline provenance`);
       } else if (c.provenanceStatus === "fresh") {
         console.log(`  prompt:   fresh`);
         console.log(`  input:    fresh`);
         console.log(`  saved:    ${savedLine}`);
-        console.log(`  status:   FRESH \u2014 fingerprints match current prompt and input${c.outputFresh === null ? "" : " and output"}`);
+        console.log(`  status:   FRESH — fingerprints match current prompt and input${c.outputFresh === null ? "" : " and output"}`);
       } else if (c.provenanceStatus === "stale") {
         console.log(`  prompt:   ${c.promptFresh ? "fresh" : "STALE"}`);
         console.log(`  input:    ${c.inputFresh ? "fresh" : "STALE"}`);
         if (c.outputFresh !== null) console.log(`  saved:    ${savedLine}`);
-        console.log(`  status:   STALE \u2014 ${c.detail ?? "fingerprints do not match"}`);
+        console.log(`  status:   STALE — ${c.detail ?? "fingerprints do not match"}`);
         console.log(`  next:     restore input/prompt/output or re-seal / re-record`);
       } else {
         anyInvalid = true;
-        console.log(`  status:   INVALID \u2014 ${c.detail ?? "malformed provenance metadata"}`);
+        console.log(`  status:   INVALID — ${c.detail ?? "malformed provenance metadata"}`);
         console.log(`  next:     repair or re-seal / re-record the cassette metadata`);
       }
       console.log();
@@ -1013,7 +1039,8 @@ async function cmdInspect(parsed: ParsedArgs): Promise<number> {
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     if (parsed.json) {
-      console.error(JSON.stringify({ error: msg }));
+      // v0.4.3: structured ERROR JSON on stdout for --json consumers.
+      console.log(JSON.stringify({ status: "ERROR", error: msg }, null, 2));
     } else {
       console.error("Desurf error:", msg);
     }
