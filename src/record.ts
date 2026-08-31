@@ -47,6 +47,10 @@ async function recordOne(
 ): Promise<RecordCaseResult> {
   try {
     if (!force && (await isNonEmptyFile(testCase.outputPath))) {
+      // Not a silent success: the caller (CLI) surfaces a loud notice when
+      // EVERY selected case ended up skipped with a live provider. That
+      // case means record could not actually capture anything — usually a
+      // missing API key — and must fail loudly (exit 2), not exit 0.
       return {
         caseId: testCase.id,
         status: "skipped",
@@ -58,6 +62,18 @@ async function recordOne(
       readFile(testCase.input, "utf8"),
       readFile(testCase.prompt, "utf8"),
     ]);
+
+    // Fail FAST before any network call: if the provider cannot execute
+    // (e.g. missing API key), surface it now so the user is not told
+    // "recording succeeded" when nothing was captured.
+    if (
+      typeof (provider as { execute?: unknown }).execute !== "function" ||
+      !provider.execute
+    ) {
+      throw new Error(
+        `Provider "${providerName}" is not executable — cannot record new outputs.`
+      );
+    }
 
     const output = await provider.execute({
       input: inputText,

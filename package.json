@@ -13,8 +13,6 @@
     "README.md"
   ],
   "scripts": {
-    "dev": "tsx server.ts",
-    "start": "node server.ts",
     "build": "tsc",
     "prepublishOnly": "npm run build",
     "test": "vitest run",
@@ -52,9 +50,7 @@
     "access": "public"
   },
   "devDependencies": {
-    "@types/express": "^5.0.6",
     "@types/node": "^22.10.0",
-    "express": "^5.2.1",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
     "vitest": "^2.1.8"

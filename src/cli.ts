@@ -13,6 +13,7 @@ import { recordSuite } from "./record.js";
 import { runSuite } from "./runner.js";
 import { sealSuite } from "./seal.js";
 import { inspectSuite } from "./inspect.js";
+import { watchSuite } from "./watch.js";
 import { MAX_REPEAT_LIVE, validateRepeat } from "./repeat.js";
 import { SavedOutputAdapter } from "./provider.js";
 import type { InspectSummary } from "./inspect.js";
@@ -52,6 +53,7 @@ Commands:
   record    Capture live provider outputs into suite output files
   seal      Establish offline cassette provenance from existing output files
   inspect   Report cassette provenance status (read-only, offline)
+  watch     Re-run a suite whenever its files change (iteration loop)
 
 Global options:
   --version, -v    Print version and exit
@@ -211,8 +213,45 @@ Exit codes:
 `);
 }
 
+function printWatchHelp(): void {
+  console.log(`desurf watch \u2014 re-run a suite whenever its files change
+
+Usage:
+  desurf watch --suite <path> [options]
+
+Options:
+  --suite <path>       Path to suite directory (or suite.json) (required)
+  --case <id>          Run only the named test case
+  --repeat <n>         Execute each case N times (default 1; max 1000, or 100 with live providers)
+  --provider <name>    offline (default) | openrouter | openai | anthropic | gemini
+  --model <id>         Model id for live providers (uses provider default if omitted)
+  --temperature <n>    Sampling temperature 0\u20132 (default 0 = deterministic)
+  --seed <n>           Best-effort determinism seed (OpenAI-compatible endpoints)
+  --max-tokens <n>     Cap output length (omitted = provider default)
+  --timeout-ms <n>     Per-request deadline in ms (default 30000; min 1000; max 600000)
+  --max-retries <n>    Retries on transient 429/5xx/network errors (default 0; max 5)
+  --system-prompt <s>  System message prepended to every user message
+  --debounce-ms <n>    Quiet window before re-running after a change (default 250)
+  --help, -h           Show this help
+
+Notes:
+  - Watches the suite directory (inputs/, prompts/, outputs/, suite.json)
+    and re-runs \`desurf test\` on every change, debounced.
+  - The iteration loop (tweak prompt \u2192 watch re-runs \u2192 see diff) is the
+    fastest way to use Desurf day-to-day.
+  - Recorded baselines drift softly by design: a changed prompt re-evaluates
+    against the current assertions and shows a diff, keeping the run green
+    unless assertions fail.
+  - Ctrl+C stops the watcher with exit 0.
+
+Exit codes:
+  Same contract as \`desurf test\`: 0 PASS \u00b7 1 REGRESSION/FLAKY \u00b7 2 ERROR
+  (reported per run; the watcher itself always exits 0 on stop).
+`);
+}
+
 function printInspectHelp(): void {
-  console.log(`desurf inspect — report cassette provenance status (read-only)
+  console.log(`desurf inspect \u2014 report cassette provenance status (read-only)
 
 Usage:
   desurf inspect --suite <path> [options]
@@ -261,6 +300,7 @@ type ParsedArgs = {
   timeoutMs?: number;
   maxRetries?: number;
   systemPrompt?: string;
+  debounceMs?: number;
   positional: string[];
 };
 
@@ -453,6 +493,24 @@ function parseArgs(argv: string[]): ParsedArgs {
     } else if (a === "--force") {
       result.force = true;
       i++;
+    } else if (a === "--debounce-ms") {
+      if (i + 1 >= args.length || args[i + 1].startsWith("-")) {
+        throw new Error("Option --debounce-ms requires a value");
+      }
+      const raw = args[++i];
+      if (!/^\d+$/.test(raw)) {
+        throw new Error(
+          `--debounce-ms must be a non-negative decimal integer (digits 0-9 only), got: ${raw}`
+        );
+      }
+      const n = Number(raw);
+      if (n < 1 || n > 60000) {
+        throw new Error(
+          `--debounce-ms must be between 1 and 60000 milliseconds (got ${n})`
+        );
+      }
+      result.debounceMs = n;
+      i++;
     } else if (a === "--verbose") {
       result.verbose = true;
       i++;
@@ -504,6 +562,25 @@ function formatCase(c: CaseReliability, verbose: boolean): string {
       if (failing.outputPreview) {
         body += `\n  output: ${failing.outputPreview}`;
       }
+      // P5: old-vs-new unified diff when the evaluated output diverged
+      // from the saved cassette (live provider drift or soft-drift
+      // evaluation). This is the one artifact a regression report cannot
+      // do without: what exactly changed.
+      if (failing.diff) {
+        body += `\n  diff (saved vs evaluated):\n${indentDiff(failing.diff)}`;
+      }
+    }
+  }
+
+  // Soft cassette drift (recorded baseline) — visible warning, not an
+  // error. The run stays green (exit 0) unless assertions fail.
+  if (c.state === "PASS" || c.state === "REGRESSION" || c.state === "FLAKY") {
+    const warnings = c.executions.flatMap((e) => e.warnings ?? []);
+    const seen = new Set<string>();
+    for (const w of warnings) {
+      if (seen.has(w)) continue;
+      seen.add(w);
+      body += `\n  WARNING: ${w}`;
     }
   }
 
@@ -515,6 +592,14 @@ function formatCase(c: CaseReliability, verbose: boolean): string {
   }
 
   return body;
+}
+
+/** Indent a multi-line diff for display inside a case block. */
+function indentDiff(diff: string): string {
+  return diff
+    .split("\n")
+    .map((l) => `    ${l}`)
+    .join("\n");
 }
 
 function summaryToJson(summary: RunSummary): object {
@@ -740,6 +825,25 @@ async function cmdRecord(parsed: ParsedArgs): Promise<number> {
       if (r.status === "error") anyError = true;
     }
 
+    // P2: "record succeeded" must not be reported when nothing was
+    // captured. If every selected case was skipped (output already
+    // exists) and NO case was actually recorded, the command did not do
+    // what it was asked to do. With a live provider this is almost always
+    // a misconfiguration (missing API key) that would otherwise produce a
+    // false-success exit 0 — a silent skip that looks like a capture.
+    const recorded = summary.results.filter((r) => r.status === "recorded").length;
+    const selected = summary.results.length;
+    if (!anyError && selected > 0 && recorded === 0) {
+      console.error(
+        `Desurf record error: nothing was recorded (${selected} case${
+          selected === 1 ? "" : "s"
+        } skipped because output already exists). ` +
+          `Use --force to overwrite, or verify the provider can actually execute ` +
+          `(e.g. ${providerName.toUpperCase()}_API_KEY is set) before re-running.`
+      );
+      return 2;
+    }
+
     return anyError ? 2 : 0;
   } catch (err) {
     console.error(err instanceof Error ? err.message : String(err));
@@ -789,6 +893,57 @@ async function cmdSeal(parsed: ParsedArgs): Promise<number> {
 }
 
 
+async function cmdWatch(parsed: ParsedArgs): Promise<number> {
+  if (parsed.help) {
+    printWatchHelp();
+    return 0;
+  }
+  if (parsed.positional.length > 0) {
+    console.error(`Unexpected positional argument: "${parsed.positional[0]}"`);
+    printWatchHelp();
+    return 2;
+  }
+  if (!parsed.suite) {
+    console.error("Missing required option: --suite <path>");
+    printWatchHelp();
+    return 2;
+  }
+
+  // Same live-provider repeat cap as `test` (billed per call).
+  if (
+    parsed.repeat !== undefined &&
+    parsed.repeat > MAX_REPEAT_LIVE &&
+    !(parsed.provider === undefined || parsed.provider === "offline")
+  ) {
+    console.error(
+      `--repeat is capped at ${MAX_REPEAT_LIVE} with live providers (got: ${parsed.repeat}). ` +
+        `Each repetition is a billed network call.`
+    );
+    return 2;
+  }
+
+  try {
+    await watchSuite({
+      suitePath: resolve(parsed.suite),
+      caseId: parsed.caseId,
+      repeat: parsed.repeat,
+      provider: parsed.provider,
+      model: parsed.model,
+      temperature: parsed.temperature,
+      seed: parsed.seed,
+      maxTokens: parsed.maxTokens,
+      timeoutMs: parsed.timeoutMs,
+      maxRetries: parsed.maxRetries,
+      systemPrompt: parsed.systemPrompt,
+      debounceMs: parsed.debounceMs,
+    });
+    return 0;
+  } catch (err) {
+    console.error(err instanceof Error ? err.message : String(err));
+    return 2;
+  }
+}
+
 async function cmdInspect(parsed: ParsedArgs): Promise<number> {
   if (parsed.help) {
     printInspectHelp();
@@ -817,7 +972,7 @@ async function cmdInspect(parsed: ParsedArgs): Promise<number> {
       return anyInvalid ? 2 : 0;
     }
 
-    console.log(`Desurf inspect — suite "${summary.suiteName}"\n`);
+    console.log(`Desurf inspect \u2014 suite "${summary.suiteName}"\n`);
     let anyInvalid = false;
     for (const c of summary.cases) {
       const state = c.cassetteState.toUpperCase();
@@ -829,27 +984,27 @@ async function cmdInspect(parsed: ParsedArgs): Promise<number> {
           : c.outputFresh
             ? "fresh"
             : "STALE (modified after seal/record)";
-      console.log(`• ${c.caseId}`);
+      console.log(`\u2022 ${c.caseId}`);
       console.log(`  cassette: ${state}`);
       console.log(`  output:   ${c.outputPath}`);
       console.log(`  meta:     ${c.metaPresent ? c.metaPath : "(none)"}`);
       if (c.provenanceStatus === "unsealed") {
-        console.log(`  status:   UNSEALED — no provenance; prompt/input drift cannot be detected`);
+        console.log(`  status:   UNSEALED \u2014 no provenance; prompt/input drift cannot be detected`);
         console.log(`  next:     run \`desurf seal --suite <path>\` to establish offline provenance`);
       } else if (c.provenanceStatus === "fresh") {
         console.log(`  prompt:   fresh`);
         console.log(`  input:    fresh`);
         console.log(`  saved:    ${savedLine}`);
-        console.log(`  status:   FRESH — fingerprints match current prompt and input${c.outputFresh === null ? "" : " and output"}`);
+        console.log(`  status:   FRESH \u2014 fingerprints match current prompt and input${c.outputFresh === null ? "" : " and output"}`);
       } else if (c.provenanceStatus === "stale") {
         console.log(`  prompt:   ${c.promptFresh ? "fresh" : "STALE"}`);
         console.log(`  input:    ${c.inputFresh ? "fresh" : "STALE"}`);
         if (c.outputFresh !== null) console.log(`  saved:    ${savedLine}`);
-        console.log(`  status:   STALE — ${c.detail ?? "fingerprints do not match"}`);
+        console.log(`  status:   STALE \u2014 ${c.detail ?? "fingerprints do not match"}`);
         console.log(`  next:     restore input/prompt/output or re-seal / re-record`);
       } else {
         anyInvalid = true;
-        console.log(`  status:   INVALID — ${c.detail ?? "malformed provenance metadata"}`);
+        console.log(`  status:   INVALID \u2014 ${c.detail ?? "malformed provenance metadata"}`);
         console.log(`  next:     repair or re-seal / re-record the cassette metadata`);
       }
       console.log();
@@ -901,7 +1056,7 @@ async function main(): Promise<number> {
 
   if (
     parsed.command === "help" ||
-    (parsed.help && !["test", "init", "record", "seal", "inspect"].includes(parsed.command))
+    (parsed.help && !["test", "init", "record", "seal", "inspect", "watch"].includes(parsed.command))
   ) {
     printRootHelp();
     return 0;
@@ -918,6 +1073,8 @@ async function main(): Promise<number> {
       return cmdSeal(parsed);
     case "inspect":
       return cmdInspect(parsed);
+    case "watch":
+      return cmdWatch(parsed);
     default:
       console.error(`Unknown command: ${parsed.command}`);
       printRootHelp();
@@ -951,4 +1108,3 @@ main().then(
     process.exitCode = 2;
   }
 );
-

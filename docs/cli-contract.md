@@ -9,14 +9,15 @@ Do not change the exit-code meanings without explicit approval.
 - `desurf init <directory>` — scaffold a new runnable suite (includes sealed example cassette)
 - `desurf record --suite <path> --provider openrouter` — capture live model responses and generate `.desurf` metadata
 - `desurf seal --suite <path>` — establish offline cassette provenance (`.desurf` metadata) for existing output files
+- `desurf watch --suite <path>` — re-run the suite whenever its files change (iteration loop)
 
 ## Cassette states
 
 | State | On disk | Drift detection | How obtained |
 |-------|---------|-----------------|--------------|
 | **UNSEALED** | output only | no | legacy / manual output without seal |
-| **SEALED** | output + `.desurf` | yes → exit **2** | `desurf seal` (offline) |
-| **RECORDED** | output + `.desurf` | yes → exit **2** | `desurf record` (live provider) |
+| **SEALED** | output + `.desurf` | yes → exit **2** (hard error) | `desurf seal` (offline) |
+| **RECORDED** | output + `.desurf` | yes → **WARNING** (soft; run stays green unless assertions fail) | `desurf record` (live provider) |
 
 Unsealed suites remain fully supported for backward compatibility. Seal when you want provenance protection.
 
@@ -35,15 +36,33 @@ desurf test --suite ./my-suite
 # Live capture
 desurf record --suite ./my-suite --provider openrouter
 desurf test --suite ./my-suite
+
+# Iteration loop
+desurf watch --suite ./my-suite
 ```
 
-After prompt or input changes on a sealed/recorded suite, `desurf test` returns **exit 2** (stale provenance). That is distinct from **exit 1** (assertions evaluated and failed). Refresh offline with `desurf seal --force` (keeps existing output; no provider), or obtain a new output with `desurf record --force`.
+After prompt or input changes:
+
+- **Sealed** suite → `desurf test` returns **exit 2** (stale provenance). That is distinct from **exit 1** (assertions evaluated and failed). Refresh offline with `desurf seal --force` (keeps existing output; no provider), or obtain a new output with `desurf record --force`.
+- **Recorded** suite → `desurf test` reports a **WARNING** and still evaluates the current assertions against the drifted baseline, showing a saved-vs-evaluated diff. The run stays green (exit 0) unless assertions fail. This keeps the iterate → re-record loop from crying wolf on every intentional prompt edit.
+
+## Watch options
+
+| Option | Meaning | Notes |
+|--------|---------|-------|
+| `--suite <path>` | Path to a test suite directory or suite.json | Required |
+| `--case <id>` | Run only the named test case | Optional |
+| `--repeat <n>` | Execute each selected case N times | Default 1 |
+| `--provider <name>` | `offline` (default), `openrouter`, `openai`, `anthropic`, `gemini` | Offline uses saved outputs; other providers are live |
+| `--debounce-ms <n>` | Quiet window before re-running after a change | Default 250 |
+
+Watch re-runs the suite on every change to the suite directory (inputs/, prompts/, outputs/, suite.json), debounced, and prints the same per-run summary plus any regression diffs. Ctrl+C stops with exit 0.
 
 ## Test options
 
 | Option | Meaning | Notes |
 |--------|---------|-------|
-| `--suite <path>` | Path to a test suite directory or suite.json | Required for normal usage |
+| `--suite <path>` | Path to a suite directory or suite.json | Required for normal usage |
 | `--case <id>` | Run only the named test case | Optional |
 | `--repeat <n>` | Execute each selected case N times | Default 1 |
 | `--provider <name>` | `offline` (default), `openrouter`, `openai`, `anthropic`, `gemini` | Offline uses saved outputs; other providers are live |
@@ -114,7 +133,7 @@ desurf test \
 
 - Live providers are **optional** and are **never** a merge gate.
 - **Exit 1** on a live run means usable output was evaluated and the **contract failed** (REGRESSION/FLAKY). That does **not** by itself mean the OpenRouter integration is broken.
-- **Exit 2** means the run could not evaluate (missing/invalid credentials, network/HTTP errors, timeout, empty response, bad configuration, **stale cassette provenance**).
+- **Exit 2** means the run could not evaluate (missing/invalid credentials, network/HTTP errors, timeout, empty response, bad configuration, **stale sealed cassette provenance**). Stale **recorded** cassette provenance is a soft WARNING (exit 0 unless assertions fail).
 - Live results are model- and provider-dependent; do not treat them as deterministic.
 
 ## Expected human-readable output (illustrative)
@@ -141,7 +160,7 @@ Exact formatting may evolve; the reliability classification and counts must rema
 
 CI systems depend on these values. They must remain stable.
 
-Provider failures (missing key, network error, HTTP 4xx/5xx, timeout, malformed response) and stale sealed/recorded cassettes surface as case **ERROR** and yield exit code **2**.
+Provider failures (missing key, network error, HTTP 4xx/5xx, timeout, malformed response) and stale **sealed** cassettes surface as case **ERROR** and yield exit code **2**. Stale **recorded** cassettes surface as a case **WARNING** (exit code stays 0 unless assertions fail).
 
 ## Reliability states (reminder)
 

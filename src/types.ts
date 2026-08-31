@@ -51,6 +51,19 @@ export type TestResult = {
   error?: string;
   /** Truncated output text for diagnostic context (optional). */
   outputPreview?: string;
+  /**
+   * Non-fatal diagnostics that did NOT fail the run (e.g. soft cassette
+   * drift on a recorded baseline). Surfaced as WARNING lines; the run
+   * stays green (exit 0) unless assertions fail.
+   */
+  warnings?: string[];
+  /**
+   * Old-vs-new output diff for a regression. Present only when the case
+   * ran offline against a saved cassette AND that cassette is the
+   * recorded baseline (so "old" is the saved output) AND the evaluation
+   * produced a different output. Shown as a unified diff.
+   */
+  diff?: string;
 };
 
 /**

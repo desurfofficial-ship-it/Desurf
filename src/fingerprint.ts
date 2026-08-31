@@ -20,6 +20,22 @@ export const LEGACY_META_VERSION = 1;
 
 export type CassetteSource = "seal" | "record";
 
+/**
+ * Severity of an input/prompt drift against a sealed/recorded cassette.
+ * - "hard"  → the cassette cannot be trusted to stand for the current
+ *   input/prompt pair; the run is an ERROR (exit 2). Unchanged behavior.
+ * - "soft"  → the drift is a WARNING: the saved output is still evaluated
+ *   against the current assertions, but the result is explicitly labeled
+ *   as based on a drifted baseline (prompt/input changed since the
+ *   cassette was recorded). The run stays green (exit 0) unless the
+ *   assertions themselves fail.
+ *
+ * Default for `seal` (explicit, offline) is "hard". `record` (live
+ * capture) writes "soft" so the natural iterate → re-record loop stops
+ * crying wolf on intentional prompt edits.
+ */
+export type DriftSeverity = "hard" | "soft";
+
 export type CassetteMeta = {
   version: number;
   inputSha256: string;
@@ -37,6 +53,16 @@ export type CassetteMeta = {
    * Missing → treat as sealed (legacy provenance present)
    */
   source?: CassetteSource;
+  /**
+   * How drift of this cassette is reported at test time.
+   * - "hard": drift → ERROR (exit 2). Default when source is "seal".
+   * - "soft": drift → WARNING (evaluated against current assertions,
+   *   run stays green unless assertions fail). Default when source is
+   *   "record".
+   * Missing → "hard" for sealed/legacy sidecars, "soft" for recorded.
+   * Unknown values are rejected on read (configuration error).
+   */
+  drift?: DriftSeverity;
   /** Live provider name when source is "record" */
   provider?: string;
   /** Live model id when source is "record" */
@@ -81,7 +107,8 @@ export function buildMeta(
   source?: CassetteSource,
   outputText?: string,
   provider?: string,
-  model?: string
+  model?: string,
+  drift: DriftSeverity = "hard"
 ): CassetteMeta {
   if (outputText === undefined) {
     // Legacy v1 builder: frozen semantics, byte-exact hashes.
@@ -117,7 +144,22 @@ export function buildMeta(
   if (model) {
     meta.model = model;
   }
+  // Recorded cassettes are ALWAYS soft (live capture is expected to be
+  // refreshed; drift is a warning). Sealed/legacy cassettes take the
+  // caller's severity (default "hard").
+  meta.drift = source === "record" ? "soft" : drift;
   return meta;
+}
+
+/**
+ * Default drift severity for a sidecar being written.
+ * - seal → hard (drift is a hard ERROR; test refuses to run against a
+ *   baseline that no longer corresponds to the files under test)
+ * - record → soft (live-captured cassettes are expected to be refreshed;
+ *   drift is a visible warning, not a hard failure)
+ */
+export function defaultDriftFor(source: CassetteSource | undefined): DriftSeverity {
+  return source === "record" ? "soft" : "hard";
 }
 
 export async function writeCassetteMeta(
@@ -127,9 +169,21 @@ export async function writeCassetteMeta(
   source?: CassetteSource,
   outputText?: string,
   provider?: string,
-  model?: string
+  model?: string,
+  drift: DriftSeverity = "hard"
 ): Promise<void> {
-  const meta = buildMeta(inputText, promptText, source, outputText, provider, model);
+  // Recorded cassettes are always soft (see buildMeta); sealed/legacy
+  // cassettes take the caller's severity (default "hard").
+  const effective = source === "record" ? "soft" : drift;
+  const meta = buildMeta(
+    inputText,
+    promptText,
+    source,
+    outputText,
+    provider,
+    model,
+    effective
+  );
   await atomicWriteFile(
     metaPathFor(outputPath),
     JSON.stringify(meta, null, 2) + "\n",
@@ -238,7 +292,29 @@ export async function readCassetteMeta(
       `Invalid cassette meta file (unknown source "${String(meta.source)}"): ${metaFile}`
     );
   }
+
+  if (
+    meta.drift !== undefined &&
+    meta.drift !== "hard" &&
+    meta.drift !== "soft"
+  ) {
+    throw new Error(
+      `Invalid cassette meta file (unknown drift severity "${String(meta.drift)}"): ${metaFile}`
+    );
+  }
   return meta;
+}
+
+/**
+ * Effective drift severity for a cassette.
+ * - explicit meta.drift wins
+ * - recorded sidecars without drift default to "soft"
+ * - sealed/legacy sidecars default to "hard"
+ */
+export function cassetteDrift(meta: CassetteMeta | null): DriftSeverity {
+  if (!meta) return "hard";
+  if (meta.drift === "soft" || meta.drift === "hard") return meta.drift;
+  return meta.source === "record" ? "soft" : "hard";
 }
 
 /**
@@ -256,35 +332,49 @@ export async function readCassetteState(
   }
 }
 
+export type CassetteFreshness = {
+  fresh: boolean;
+  promptStale: boolean;
+  inputStale: boolean;
+  /** Effective drift severity of the cassette (soft = warning, hard = error). */
+  severity: DriftSeverity;
+};
+
 /**
- * If a meta sidecar exists, verify current input/prompt match the recorded hashes.
- * Throws with a clear message on mismatch (caller maps this to ERROR / exit 2).
- * Missing sidecar → no-op (legacy fixture).
+ * If a meta sidecar exists, compare current input/prompt against the
+ * recorded hashes. Returns a structured freshness report; callers decide
+ * whether drift is a hard error or a warning.
+ * Missing sidecar → { fresh: true } (legacy fixture).
  *
  * Hash mode follows the sidecar version: v1 compares byte-exact (frozen
  * legacy semantics), v2 compares CRLF-normalized (autocrlf tolerance).
  */
-export async function assertCassetteFresh(
+export async function checkCassetteFresh(
   outputPath: string,
   inputText: string,
   promptText: string
-): Promise<void> {
+): Promise<CassetteFreshness> {
   const meta = await readCassetteMeta(outputPath);
   if (!meta) {
-    return;
+    return { fresh: true, promptStale: false, inputStale: false, severity: "hard" };
   }
 
   const hash = meta.version >= META_VERSION ? sha256Normalized : sha256;
   const inputHash = hash(inputText);
   const promptHash = hash(promptText);
 
-  const inputStale = meta.inputSha256 !== inputHash;
   const promptStale = meta.promptSha256 !== promptHash;
+  const inputStale = meta.inputSha256 !== inputHash;
 
-  if (!inputStale && !promptStale) {
-    return;
-  }
+  return {
+    fresh: !promptStale && !inputStale,
+    promptStale,
+    inputStale,
+    severity: cassetteDrift(meta),
+  };
+}
 
+function driftParts(promptStale: boolean, inputStale: boolean): string[] {
   const parts: string[] = [];
   if (promptStale) {
     parts.push("Prompt changed since output was recorded.");
@@ -292,12 +382,57 @@ export async function assertCassetteFresh(
   if (inputStale) {
     parts.push("Input changed since output was recorded.");
   }
+  return parts;
+}
+
+/**
+ * If a meta sidecar exists, verify current input/prompt match the recorded
+ * hashes. Throws with a clear message on mismatch.
+ *
+ * Missing sidecar → no-op (legacy fixture).
+ *
+ * Hard cassettes (sealed / legacy) throw → the caller maps this to ERROR
+ * (exit 2): the saved output no longer corresponds to the files under
+ * test, so Desurf refuses to treat the result as a contract verdict.
+ *
+ * Soft cassettes (recorded) throw {@link SoftDriftError}: the caller maps
+ * this to a visible WARNING and still evaluates the current assertions
+ * against the drifted baseline, keeping the run green (exit 0) unless the
+ * assertions themselves fail.
+ */
+export async function assertCassetteFresh(
+  outputPath: string,
+  inputText: string,
+  promptText: string
+): Promise<void> {
+  const freshness = await checkCassetteFresh(outputPath, inputText, promptText);
+  if (freshness.fresh) {
+    return;
+  }
+
+  const parts = driftParts(freshness.promptStale, freshness.inputStale);
   parts.push(
     "Refresh provenance offline with `desurf seal --force` (keeps the existing output), " +
       "re-capture with `desurf record --force` (new provider output), " +
       "or restore the previous input/prompt."
   );
-  throw new Error(parts.join(" "));
+  const message = parts.join(" ");
+
+  if (freshness.severity === "soft") {
+    throw new SoftDriftError(message);
+  }
+  throw new Error(message);
+}
+
+/**
+ * Marker error for drift against a soft (recorded) cassette.
+ * The runner maps it to a WARNING instead of an ERROR.
+ */
+export class SoftDriftError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "SoftDriftError";
+  }
 }
 
 /**

@@ -6,7 +6,13 @@
 import { readFile } from "node:fs/promises";
 import { evaluateTestCase } from "./engine.js";
 import { loadSuite } from "./offline.js";
-import { assertCassetteFresh, readCassetteState, verifyCassetteOutput } from "./fingerprint.js";
+import {
+  assertCassetteFresh,
+  checkCassetteFresh,
+  readCassetteState,
+  verifyCassetteOutput,
+} from "./fingerprint.js";
+import { unifiedDiff } from "./diff.js";
 import { SavedOutputAdapter } from "./provider.js";
 import { summarizeCase, validateRepeat } from "./repeat.js";
 import type {
@@ -33,6 +39,8 @@ export type RunSummary = {
   flaky: number;
   regression: number;
   errors: number;
+  /** Non-fatal warnings (soft cassette drift). Run still passes (exit 0). */
+  warnings: number;
 };
 
 async function runOneExecution(
@@ -45,9 +53,35 @@ async function runOneExecution(
       readFile(testCase.prompt, "utf8"),
     ]);
 
+    let driftWarning: string | undefined;
+    let savedOutput: string | undefined;
+
     // Stale-fixture check only applies offline (saved cassette evaluation).
     if (provider instanceof SavedOutputAdapter) {
-      await assertCassetteFresh(testCase.outputPath, inputText, promptText);
+      const freshness = await checkCassetteFresh(
+        testCase.outputPath,
+        inputText,
+        promptText
+      );
+      if (!freshness.fresh && freshness.severity === "soft") {
+        // Recorded baseline drifted (prompt/input changed since capture).
+        // This is a WARNING, not an ERROR: the cassette still stands as
+        // the "old" side of the comparison and assertions still run.
+        const parts: string[] = [];
+        if (freshness.promptStale) {
+          parts.push("Prompt changed since output was recorded.");
+        }
+        if (freshness.inputStale) {
+          parts.push("Input changed since output was recorded.");
+        }
+        driftWarning =
+          parts.join(" ") +
+          " WARNING: evaluating against a drifted recorded baseline. " +
+          "Re-capture with `desurf record --force` or re-seal with `desurf seal --force` to refresh.";
+      } else {
+        // Hard drift (sealed/legacy): refuse to evaluate — ERROR (exit 2).
+        await assertCassetteFresh(testCase.outputPath, inputText, promptText);
+      }
     }
 
     const output = await provider.execute({
@@ -56,6 +90,19 @@ async function runOneExecution(
       outputPath: testCase.outputPath,
     });
 
+    // Best-effort read of the saved cassette (offline OR live-provider
+    // runs): it becomes the "old" side of the P5 regression diff. When
+    // the provider IS the saved output, this is the output being
+    // evaluated; when it is a live provider, it is the baseline the new
+    // output is compared against.
+    if (savedOutput === undefined) {
+      try {
+        savedOutput = await readFile(testCase.outputPath, "utf8");
+      } catch {
+        savedOutput = undefined; // no cassette on disk (fresh live run)
+      }
+    }
+
     // Authenticate the cassette itself (v2 sidecars): without this, an
     // output file edited after sealing would be evaluated as if it were
     // the sealed bytes, with provenance still reporting "fresh".
@@ -63,7 +110,21 @@ async function runOneExecution(
       await verifyCassetteOutput(testCase.outputPath, output.text);
     }
 
-    return evaluateTestCase(testCase, output);
+    const result = evaluateTestCase(testCase, output);
+
+    if (driftWarning) {
+      result.warnings = [driftWarning];
+    }
+
+    // Diff on regression (P5): when the evaluated output differs from the
+    // saved cassette, show old-vs-new. This applies to live-provider runs
+    // against a saved cassette AND offline evaluation after a soft drift
+    // (where the fresh prompt produced a different saved output).
+    if (savedOutput !== undefined && savedOutput !== output.text) {
+      result.diff = unifiedDiff(savedOutput, output.text);
+    }
+
+    return result;
   } catch (err) {
     return {
       caseId: testCase.id,
@@ -109,6 +170,15 @@ export async function runSuite(options: RunOptions): Promise<RunSummary> {
   const flaky = caseResults.filter((c) => c.state === "FLAKY").length;
   const regression = caseResults.filter((c) => c.state === "REGRESSION").length;
   const errors = caseResults.filter((c) => c.state === "ERROR").length;
+  const warnings = caseResults.reduce(
+    (acc, c) =>
+      acc +
+      c.executions.reduce(
+        (n, e) => n + (e.warnings ? e.warnings.length : 0),
+        0
+      ),
+    0
+  );
 
   return {
     suiteName: suite.name,
@@ -117,5 +187,6 @@ export async function runSuite(options: RunOptions): Promise<RunSummary> {
     flaky,
     regression,
     errors,
+    warnings,
   };
 }
