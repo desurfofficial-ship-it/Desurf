@@ -90,9 +90,10 @@ export class OpenRouterAdapter implements ModelAdapter {
 
     const selectedModel = request.model ?? this.model;
     // Live path ignores outputPath; input + prompt form the user message.
-    const userContent = [request.prompt.trim(), request.input.trim()]
-      .filter(Boolean)
-      .join("\n\n");
+    const hasHistory = Boolean(request.history && request.history.length > 0);
+    const userContent = hasHistory
+      ? request.input.trim()
+      : [request.prompt.trim(), request.input.trim()].filter(Boolean).join("\n\n");
 
     // Request-level overrides win over constructor-level.
     const temperature =
@@ -106,12 +107,19 @@ export class OpenRouterAdapter implements ModelAdapter {
         ? normalizeMaxTokens(request.maxTokens)
         : this.maxTokens;
     const systemPrompt =
-      request.systemPrompt?.trim() || this.systemPrompt;
+      request.systemPrompt?.trim() ||
+      this.systemPrompt ||
+      (hasHistory ? request.prompt.trim() || undefined : undefined);
 
-    // Build the messages array. system role first (if provided), then user.
+    // Build the messages array. system → history → final user (D4).
     const messages: Array<{ role: string; content: string }> = [];
     if (systemPrompt) {
       messages.push({ role: "system", content: systemPrompt });
+    }
+    if (hasHistory && request.history) {
+      for (const h of request.history) {
+        messages.push({ role: h.role, content: h.content });
+      }
     }
     messages.push({ role: "user", content: userContent });
 

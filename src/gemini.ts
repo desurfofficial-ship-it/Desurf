@@ -86,9 +86,10 @@ export class GeminiAdapter implements ModelAdapter {
     }
 
     const selectedModel = request.model ?? this.model;
-    const userContent = [request.prompt.trim(), request.input.trim()]
-      .filter(Boolean)
-      .join("\n\n");
+    const hasHistory = Boolean(request.history && request.history.length > 0);
+    const userContent = hasHistory
+      ? request.input.trim()
+      : [request.prompt.trim(), request.input.trim()].filter(Boolean).join("\n\n");
 
     const temperature =
       request.temperature !== undefined
@@ -99,18 +100,22 @@ export class GeminiAdapter implements ModelAdapter {
         ? normalizeMaxTokens(request.maxTokens)
         : this.maxTokens;
     const systemPrompt =
-      request.systemPrompt?.trim() || this.systemPrompt;
+      request.systemPrompt?.trim() ||
+      this.systemPrompt ||
+      (hasHistory ? request.prompt.trim() || undefined : undefined);
 
-    // Gemini's generationConfig holds temperature + maxOutputTokens;
-    // systemInstruction is a sibling of `contents`.
-    const reqBody: Record<string, unknown> = {
-      contents: [
-        {
-          role: "user",
-          parts: [{ text: userContent }],
-        },
-      ],
-    };
+    // Gemini: contents role user/model; systemInstruction sibling (D4).
+    const contents: Array<{ role: string; parts: Array<{ text: string }> }> = [];
+    if (hasHistory && request.history) {
+      for (const h of request.history) {
+        contents.push({
+          role: h.role === "assistant" ? "model" : "user",
+          parts: [{ text: h.content }],
+        });
+      }
+    }
+    contents.push({ role: "user", parts: [{ text: userContent }] });
+    const reqBody: Record<string, unknown> = { contents };
     const generationConfig: Record<string, unknown> = {};
     if (temperature !== undefined) {
       generationConfig.temperature = temperature;

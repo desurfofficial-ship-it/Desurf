@@ -86,9 +86,10 @@ export class AnthropicAdapter implements ModelAdapter {
     }
 
     const selectedModel = request.model ?? this.model;
-    const userContent = [request.prompt.trim(), request.input.trim()]
-      .filter(Boolean)
-      .join("\n\n");
+    const hasHistory = Boolean(request.history && request.history.length > 0);
+    const userContent = hasHistory
+      ? request.input.trim()
+      : [request.prompt.trim(), request.input.trim()].filter(Boolean).join("\n\n");
 
     const temperature =
       request.temperature !== undefined
@@ -99,15 +100,24 @@ export class AnthropicAdapter implements ModelAdapter {
         ? normalizeMaxTokens(request.maxTokens) ?? this.maxTokens
         : this.maxTokens;
     const systemPrompt =
-      request.systemPrompt?.trim() || this.systemPrompt;
+      request.systemPrompt?.trim() ||
+      this.systemPrompt ||
+      (hasHistory ? request.prompt.trim() || undefined : undefined);
 
-    // Anthropic's API takes `system` as a top-level field, not a message role.
+    // Anthropic: system top-level; messages alternate user/assistant (D4).
+    const messages: Array<{ role: string; content: string }> = [];
+    if (hasHistory && request.history) {
+      for (const h of request.history) {
+        messages.push({ role: h.role, content: h.content });
+      }
+    }
+    messages.push({ role: "user", content: userContent });
     const reqBody: Record<string, unknown> = {
       model: selectedModel,
       max_tokens: maxTokens,
       // Default temperature 0 = deterministic.
       temperature,
-      messages: [{ role: "user", content: userContent }],
+      messages,
     };
     if (systemPrompt) {
       reqBody.system = systemPrompt;

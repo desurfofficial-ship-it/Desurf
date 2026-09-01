@@ -83,9 +83,12 @@ export class OpenAIAdapter implements ModelAdapter {
     }
 
     const selectedModel = request.model ?? this.model;
-    const userContent = [request.prompt.trim(), request.input.trim()]
-      .filter(Boolean)
-      .join("\n\n");
+    const hasHistory = Boolean(request.history && request.history.length > 0);
+    // Multi-turn (D4): history present → input is the current user turn only;
+    // prompt falls through as system. Single-turn keeps legacy join behavior.
+    const userContent = hasHistory
+      ? request.input.trim()
+      : [request.prompt.trim(), request.input.trim()].filter(Boolean).join("\n\n");
 
     const temperature =
       request.temperature !== undefined
@@ -98,11 +101,18 @@ export class OpenAIAdapter implements ModelAdapter {
         ? normalizeMaxTokens(request.maxTokens)
         : this.maxTokens;
     const systemPrompt =
-      request.systemPrompt?.trim() || this.systemPrompt;
+      request.systemPrompt?.trim() ||
+      this.systemPrompt ||
+      (hasHistory ? request.prompt.trim() || undefined : undefined);
 
     const messages: Array<{ role: string; content: string }> = [];
     if (systemPrompt) {
       messages.push({ role: "system", content: systemPrompt });
+    }
+    if (hasHistory && request.history) {
+      for (const h of request.history) {
+        messages.push({ role: h.role, content: h.content });
+      }
     }
     messages.push({ role: "user", content: userContent });
 
