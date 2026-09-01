@@ -48,6 +48,14 @@ Every test case has an output cassette. That cassette is in one of three states:
 
 `seal` and `record` produce the same `.desurf` shape. The difference is only how the output was obtained.
 
+
+## v0.5.0 — Safe recording workflow
+
+`desurf record` proposes (new/unchanged/drift) without mutating baselines.
+Review with `desurf diff` / `desurf history`, promote with `desurf accept --yes`.
+Legacy: `--fill-gaps` (old plain record), `--force` (overwrite + baseline-backup).
+Add `.desurf-history/` to `.gitignore` if desired.
+
 ## Recommended workflow
 
 **You already have a response file:**
@@ -201,3 +209,7 @@ See `docs/cli-contract.md`, `docs/test-case-schema.md`, `docs/architecture.md`.
 ## License
 
 MIT
+
+## Drift-watch (v0.6.0)
+
+Scheduled live monitoring that opens GitHub issues on sustained REGRESSION. See [docs/drift-watch.md](docs/drift-watch.md) and `examples/github-actions/desurf-drift-watch.yml`.

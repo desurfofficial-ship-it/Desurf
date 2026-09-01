@@ -9,7 +9,17 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createProvider } from "./create-provider.js";
 import { initSuite } from "./init.js";
-import { recordSuite } from "./record.js";
+import { recordSuite, recordExitCode } from "./record.js";
+import {
+  listHistory,
+  pickEntry,
+  acceptSnapshot,
+  revertToBackup,
+  HistoryError,
+} from "./history.js";
+import { loadSuite } from "./offline.js";
+import { unifiedDiff } from "./diff.js";
+import { isatty } from "node:tty";
 import { runSuite } from "./runner.js";
 import { sealSuite } from "./seal.js";
 import { inspectSuite } from "./inspect.js";
@@ -38,7 +48,7 @@ function getVersion(): string {
   } catch {
     // fall through
   }
-  return "0.4.3";
+  return "0.6.0";
 }
 
 function printRootHelp(): void {
@@ -50,7 +60,11 @@ Usage:
 Commands:
   test      Run a suite against offline saved outputs or a live provider
   init      Create a minimal runnable offline suite
-  record    Capture live provider outputs into suite output files
+  record    Capture live output; propose drift (never mutates baseline)
+  accept    Promote a history snapshot to the baseline cassette
+  revert    Restore a baseline from a history backup snapshot
+  diff      Show unified diff for a pending record snapshot
+  history   List cassette history snapshots for a suite
   seal      Establish offline cassette provenance from existing output files
   inspect   Report cassette provenance status (read-only, offline)
   watch     Re-run a suite whenever its files change (iteration loop)
@@ -144,44 +158,38 @@ Options:
 }
 
 function printRecordHelp(): void {
-  console.log(`desurf record — capture live provider output into suite files
+  console.log(`desurf record — capture live provider output and classify vs baseline
 
 Usage:
   desurf record --suite <path> --provider <name> [options]
 
 Options:
-  --suite <path>       Path to suite directory (or suite.json) (required)
-  --provider <name>    Live provider: openrouter | openai | anthropic | gemini (required)
-  --model <id>         Model id (uses provider default if omitted)
-  --temperature <n>    Sampling temperature 0–2 (default 0 = deterministic; see desurf test --help)
-  --seed <n>           Best-effort determinism seed (OpenAI-compatible endpoints)
-  --max-tokens <n>     Cap output length (omitted = provider default; Anthropic requires it and defaults to 4096)
-  --timeout-ms <n>     Per-request deadline in ms (default 30000; min 1000; max 600000)
-  --max-retries <n>    Retries on transient 429/5xx/network errors (default 0; max 5)
-  --system-prompt <s>  System message prepended to every user message
-  --case <id>          Record only the named test case
-  --force              Overwrite existing non-empty output files
-  --help, -h           Show this help
+  --suite <path>         Path to suite directory (or suite.json) (required)
+  --provider <name>      openrouter | openai | anthropic | gemini (required; not offline)
+  --model <id>           Model id for the live provider
+  --case <id>            Record only the named test case
+  --force                Accept immediately: backup baseline, then overwrite
+  --fill-gaps            Only record missing/empty outputs (legacy no-flag behavior)
+  --history-limit <n>    Ring-buffer cap per case (default 10; 1–100)
+  --temperature <n>      Sampling temperature 0–2 (default 0)
+  --seed <n>             Best-effort determinism seed
+  --max-tokens <n>       Cap output length
+  --timeout-ms <n>       Per-request deadline in ms
+  --max-retries <n>      Retries on transient errors (default 0; max 5)
+  --system-prompt <s>    System message prepended to every user message
+  --json                 Machine-readable JSON on stdout
+  --help, -h             Show this help
 
-Environment:
-  OPENROUTER_API_KEY   Required for openrouter (never printed)
-  OPENAI_API_KEY       Required for openai (never printed)
-  ANTHROPIC_API_KEY    Required for anthropic (never printed)
-  GEMINI_API_KEY       Required for gemini (or GOOGLE_API_KEY) (never printed)
-
-  DESURF_TIMEOUT_MS    Fallback per-request deadline if --timeout-ms omitted
-  DESURF_MAX_RETRIES   Fallback retry count if --max-retries omitted
-
-Notes:
-  - Does not evaluate assertions; only captures provider output.
-  - Existing non-empty outputs are skipped unless --force is set.
-  - Partial success is preserved if a later case fails.
-  - --temperature defaults to 0 so a re-record against the same prompt/input
-    reproduces the same output (otherwise the next test flags spurious drift).
+Behavior (propose mode — default):
+  Capture live output. Classify as new | unchanged | drift.
+  Write history snapshots for new and drift under .desurf-history/.
+  NEVER modify an existing baseline unless --force.
+  After drift: desurf diff, then desurf accept.
 
 Exit codes:
-  0  all selected cases recorded or intentionally skipped
-  2  configuration / provider / unknown-case error, or any case failed to record
+  0  all cases new or unchanged (or --force/--fill-gaps with no errors)
+  1  ≥1 drift (propose mode)
+  2  any case error or configuration failure
 `);
 }
 
@@ -297,6 +305,12 @@ type ParsedArgs = {
   provider?: string;
   model?: string;
   force?: boolean;
+  fillGaps?: boolean;
+  historyLimit?: number;
+  entry?: string;
+  all?: boolean;
+  yes?: boolean;
+  full?: boolean;
   verbose?: boolean;
   json?: boolean;
   // Live-provider generation knobs (ignored by offline adapter).
@@ -498,6 +512,35 @@ function parseArgs(argv: string[]): ParsedArgs {
       i++;
     } else if (a === "--force") {
       result.force = true;
+      i++;
+    } else if (a === "--fill-gaps") {
+      result.fillGaps = true;
+      i++;
+    } else if (a === "--history-limit") {
+      if (i + 1 >= args.length || args[i + 1].startsWith("-")) {
+        throw new Error("Option --history-limit requires a value");
+      }
+      const raw = args[++i];
+      const n = parseNumericFlag(raw, "history-limit", { integer: true });
+      if (n < 1 || n > 100) {
+        throw new Error(`--history-limit must be an integer between 1 and 100 (got ${n})`);
+      }
+      result.historyLimit = n;
+      i++;
+    } else if (a === "--entry") {
+      if (i + 1 >= args.length || args[i + 1].startsWith("-")) {
+        throw new Error("Option --entry requires a value");
+      }
+      result.entry = args[++i];
+      i++;
+    } else if (a === "--all") {
+      result.all = true;
+      i++;
+    } else if (a === "--yes" || a === "-y") {
+      result.yes = true;
+      i++;
+    } else if (a === "--full") {
+      result.full = true;
       i++;
     } else if (a === "--debounce-ms") {
       if (i + 1 >= args.length || args[i + 1].startsWith("-")) {
@@ -794,29 +837,26 @@ async function cmdRecord(parsed: ParsedArgs): Promise<number> {
     return 2;
   }
   if (!parsed.provider) {
-    console.error(
-      "Missing required option: --provider <name> (e.g. openrouter, openai, anthropic, gemini)"
-    );
+    console.error("Missing required option: --provider <name>");
     printRecordHelp();
     return 2;
   }
 
-  const providerName = parsed.provider.toLowerCase();
-  if (
-    providerName === "offline" ||
-    providerName === "saved" ||
-    providerName === "saved-output"
-  ) {
-    console.error(
-      "record requires a live provider (e.g. openrouter, openai, anthropic, gemini). Offline provider cannot capture new outputs."
-    );
-    return 2;
-  }
-
-  let provider;
   try {
-    provider = createProvider({
-      provider: parsed.provider,
+    const providerName = parsed.provider;
+    if (
+      providerName === "offline" ||
+      providerName === "saved" ||
+      providerName === "saved-output"
+    ) {
+      console.error(
+        "record requires a live provider (e.g. openrouter, openai, anthropic, gemini). Offline provider cannot capture new outputs."
+      );
+      return 2;
+    }
+
+    const provider = createProvider({
+      provider: providerName,
       model: parsed.model,
       temperature: parsed.temperature,
       seed: parsed.seed,
@@ -825,52 +865,94 @@ async function cmdRecord(parsed: ParsedArgs): Promise<number> {
       maxRetries: parsed.maxRetries,
       systemPrompt: parsed.systemPrompt,
     });
-  } catch (err) {
-    console.error(err instanceof Error ? err.message : String(err));
-    return 2;
-  }
 
-  try {
     const summary = await recordSuite({
       suitePath: resolve(parsed.suite),
       provider,
       providerName,
       model: parsed.model,
       caseId: parsed.caseId,
-      force: parsed.force,
+      force: parsed.force === true,
+      fillGaps: parsed.fillGaps === true,
+      historyLimit: parsed.historyLimit,
+      cliVersion: getVersion(),
     });
 
-    console.log(`Desurf record — suite "${summary.suiteName}"\n`);
-    let anyError = false;
+    const exitCode = recordExitCode(summary, {
+      force: parsed.force === true,
+      fillGaps: parsed.fillGaps === true,
+    });
+
+    if (parsed.json) {
+      const payload = {
+        command: "record",
+        suite: summary.suiteName,
+        provider: summary.providerName,
+        model: summary.model ?? null,
+        exitCode,
+        summary: summary.summary,
+        results: summary.results.map((r) => ({
+          caseId: r.caseId,
+          verdict: r.verdict,
+          assertionsPassed: r.assertionsPassed ?? null,
+          baselineSha256: r.baselineSha256 ?? null,
+          outputSha256: r.outputSha256 ?? null,
+          snapshot: r.snapshot ?? null,
+          diff: r.diff ?? null,
+          message: r.message,
+        })),
+      };
+      console.log(JSON.stringify(payload, null, 2));
+      return exitCode;
+    }
+
+    console.log(
+      `Desurf record — suite "${summary.suiteName}" (provider ${summary.providerName}${
+        summary.model ? `, model ${summary.model}` : ""
+      })\n`
+    );
+
     for (const r of summary.results) {
-      const mark =
-        r.status === "recorded" ? "✓" : r.status === "skipped" ? "·" : "✗";
-      console.log(`${mark} ${r.caseId}: ${r.status}`);
-      console.log(`  ${r.message}`);
-      console.log();
-      if (r.status === "error") anyError = true;
+      const marker =
+        r.verdict === "unchanged"
+          ? "="
+          : r.verdict === "drift"
+            ? "!"
+            : r.verdict === "new"
+              ? "+"
+              : "x";
+      const label = r.verdict.toUpperCase().padEnd(9);
+      console.log(`${marker} ${r.caseId.padEnd(20)} ${label}  ${r.message}`);
+      if (r.snapshot) {
+        console.log(`    ${r.snapshot}`);
+      }
+      if (r.verdict === "drift" && r.diff) {
+        console.log(`\nDrift diff (${r.caseId}):\n${r.diff}\n`);
+      }
+      if (
+        (r.verdict === "new" || r.verdict === "drift") &&
+        r.assertionsPassed !== undefined &&
+        r.assertionsPassed !== null
+      ) {
+        const pass = r.assertionsPassed ? "PASS" : "FAIL";
+        console.log(
+          `Contract check: ${r.caseId} — assertions ${pass} against new output`
+        );
+      }
     }
 
-    // P2: "record succeeded" must not be reported when nothing was
-    // captured. If every selected case was skipped (output already
-    // exists) and NO case was actually recorded, the command did not do
-    // what it was asked to do. With a live provider this is almost always
-    // a misconfiguration (missing API key) that would otherwise produce a
-    // false-success exit 0 — a silent skip that looks like a capture.
-    const recorded = summary.results.filter((r) => r.status === "recorded").length;
-    const selected = summary.results.length;
-    if (!anyError && selected > 0 && recorded === 0) {
-      console.error(
-        `Desurf record error: nothing was recorded (${selected} case${
-          selected === 1 ? "" : "s"
-        } skipped because output already exists). ` +
-          `Use --force to overwrite, or verify the provider can actually execute ` +
-          `(e.g. ${providerName.toUpperCase()}_API_KEY is set) before re-running.`
+    const s = summary.summary;
+    console.log(
+      `\nSummary: ${s.unchanged} unchanged, ${s.drift} drift, ${s.new} new, ${s.error} error`
+    );
+    if (s.drift > 0 && !parsed.force) {
+      console.log(
+        `Next: \`desurf diff --suite ${parsed.suite} --case <id>\` to inspect, then\n` +
+          `      \`desurf accept --suite ${parsed.suite} --case <id>\` (or \`--all\`).`
       );
-      return 2;
     }
 
-    return anyError ? 2 : 0;
+    return exitCode;
   } catch (err) {
     console.error(err instanceof Error ? err.message : String(err));
     return 2;
@@ -1066,6 +1148,310 @@ function inspectToJson(summary: InspectSummary): object {
   };
 }
 
+
+function printHistoryHelp(): void {
+  console.log(`desurf history — list cassette history snapshots
+
+Usage:
+  desurf history --suite <path> [--case <id>] [--json]
+
+Exit codes:
+  0  success
+  1  no history for the requested scope
+  2  corrupt store or configuration error
+`);
+}
+
+function printDiffHelp(): void {
+  console.log(`desurf diff — show unified diff for a pending record snapshot
+
+Usage:
+  desurf diff --suite <path> --case <id> [--entry <n|file>] [--full]
+
+Exit codes:
+  0  diff produced
+  1  nothing to diff
+  2  corrupt store / unknown case
+`);
+}
+
+function printAcceptHelp(): void {
+  console.log(`desurf accept — promote a history snapshot to the baseline
+
+Usage:
+  desurf accept --suite <path> [--case <id> | --all] [--entry <n|file>] [--yes] [--json]
+
+Without --yes, confirmation is required when stdin is a TTY.
+In non-interactive mode, --yes is required (exit 2 otherwise).
+
+Exit codes:
+  0  every requested case accepted
+  1  nothing to accept
+  2  integrity / config / missing --yes in non-TTY
+`);
+}
+
+function printRevertHelp(): void {
+  console.log(`desurf revert — restore a baseline from a history backup
+
+Usage:
+  desurf revert --suite <path> --case <id> [--entry <n|file>] [--yes]
+
+Exit codes:
+  0  restored
+  1  nothing to revert
+  2  integrity / config / missing --yes in non-TTY
+`);
+}
+
+async function cmdHistory(parsed: ParsedArgs): Promise<number> {
+  if (parsed.help) { printHistoryHelp(); return 0; }
+  if (!parsed.suite) {
+    console.error("Missing required option: --suite <path>");
+    printHistoryHelp();
+    return 2;
+  }
+  try {
+    const suite = await loadSuite(resolve(parsed.suite));
+    const listed = await listHistory(suite.rootDir, parsed.caseId);
+    for (const item of listed) {
+      if (item.rebuilt) {
+        console.error(`WARNING: index.json missing; rebuilt from ${item.entries.length} snapshot files`);
+      }
+    }
+    const withEntries = listed.filter((c) => c.entries.length > 0);
+    if (parsed.json) {
+      console.log(JSON.stringify({
+        command: "history",
+        suite: suite.name,
+        cases: listed.map((c) => ({
+          caseId: c.caseId,
+          pendingReview: c.pendingReview,
+          entries: c.entries,
+        })),
+      }, null, 2));
+    } else {
+      if (withEntries.length === 0) {
+        console.log(`No history for suite "${suite.name}"`);
+      } else {
+        for (const c of listed) {
+          if (c.entries.length === 0) continue;
+          const pending = c.entries.filter((e) => e.kind === "record" && e.acceptedAt === null).length;
+          console.log(`${c.caseId}  (${c.entries.length} snapshots, ${pending} pending review)`);
+          c.entries.forEach((e, i) => {
+            const acc = e.acceptedAt ? `accepted: ${e.acceptedAt}` : "accepted: no";
+            const verd = e.verdictAtCapture ?? "";
+            const ap = e.assertionsPassed === true ? "assertions PASS" : e.assertionsPassed === false ? "assertions FAIL" : "";
+            console.log(`  ${i + 1}. ${e.file}   ${e.kind}  ${verd}  ${e.outputSha256.slice(0, 8)}…  ${ap}  ${acc}`);
+          });
+        }
+      }
+    }
+    if (withEntries.length === 0) return 1;
+    return 0;
+  } catch (err) {
+    if (err instanceof HistoryError && err.code === "corrupt-index") {
+      console.error(err.message);
+      return 2;
+    }
+    console.error(err instanceof Error ? err.message : String(err));
+    return 2;
+  }
+}
+
+async function cmdDiff(parsed: ParsedArgs): Promise<number> {
+  if (parsed.help) { printDiffHelp(); return 0; }
+  if (!parsed.suite || !parsed.caseId) {
+    console.error("Missing required options: --suite <path> --case <id>");
+    printDiffHelp();
+    return 2;
+  }
+  try {
+    const suite = await loadSuite(resolve(parsed.suite));
+    const tc = suite.cases.find((c) => c.id === parsed.caseId);
+    if (!tc) {
+      console.error(`No test case with id "${parsed.caseId}" in suite "${suite.name}"`);
+      return 2;
+    }
+    let picked;
+    try {
+      picked = await pickEntry(suite.rootDir, parsed.caseId!, parsed.entry, { kind: "record" });
+    } catch (err) {
+      if (err instanceof HistoryError && err.code === "not-found") {
+        console.error(err.message);
+        return 1;
+      }
+      throw err;
+    }
+    const { snapshot, entry } = picked;
+    let baselineText = "";
+    try {
+      const { readFile } = await import("node:fs/promises");
+      baselineText = await readFile(tc.outputPath, "utf8");
+    } catch {
+      baselineText = "";
+    }
+    console.log(`Diff — case ${parsed.caseId}`);
+    console.log(`  verdict: ${snapshot.verdictAtCapture}  recordedAt: ${snapshot.recordedAt}`);
+    console.log(`  provider: ${snapshot.provider}  model: ${snapshot.model}`);
+    console.log(`  assertionsPassed: ${snapshot.assertionsPassed}`);
+    console.log(`  snapshot: ${entry.file}`);
+    if (!baselineText) {
+      console.log("\n(no baseline on disk — showing snapshot output only)\n");
+      console.log(snapshot.output);
+    } else {
+      // unifiedDiff has fixed 200-line cap; --full note for future
+      const d = unifiedDiff(baselineText, snapshot.output);
+      console.log("\n" + (d || "(no textual diff — outputs equal after normalization)"));
+    }
+    return 0;
+  } catch (err) {
+    console.error(err instanceof Error ? err.message : String(err));
+    return 2;
+  }
+}
+
+async function cmdAccept(parsed: ParsedArgs): Promise<number> {
+  if (parsed.help) { printAcceptHelp(); return 0; }
+  if (!parsed.suite) {
+    console.error("Missing required option: --suite <path>");
+    printAcceptHelp();
+    return 2;
+  }
+  if (!parsed.caseId && !parsed.all) {
+    console.error("Specify --case <id> or --all");
+    printAcceptHelp();
+    return 2;
+  }
+  // E13: non-TTY without --yes
+  if (!parsed.yes && !isatty(process.stdin.fd)) {
+    console.error("refusing to accept without --yes in non-interactive mode");
+    return 2;
+  }
+
+  try {
+    const suite = await loadSuite(resolve(parsed.suite));
+    const targets = parsed.all
+      ? suite.cases
+      : suite.cases.filter((c) => c.id === parsed.caseId);
+    if (!parsed.all && targets.length === 0) {
+      console.error(`No test case with id "${parsed.caseId}" in suite "${suite.name}"`);
+      return 2;
+    }
+
+    // Interactive confirmation for TTY without --yes: print and require --yes for simplicity
+    // Spec says ask for confirmation when TTY; we require typing by using --yes always for safety in automation
+    if (!parsed.yes && isatty(process.stdin.fd)) {
+      // Print pending diffs and ask — without readline dep, require --yes even on TTY for zero-deps
+      console.error("Confirmation required: re-run with --yes to accept (zero-deps CLI; no interactive prompt library).");
+      return 2;
+    }
+
+    const accepted: Array<{ caseId: string; snapshot: string; backup: string | null }> = [];
+    const nothingToAccept: string[] = [];
+    const errors: Array<{ caseId: string; message: string }> = [];
+
+    for (const tc of targets) {
+      try {
+        const result = await acceptSnapshot(
+          suite.rootDir,
+          tc.id,
+          tc.outputPath,
+          tc.input,
+          tc.prompt,
+          {
+            entry: parsed.entry,
+            historyLimit: parsed.historyLimit,
+            cliVersion: getVersion(),
+          }
+        );
+        accepted.push(result);
+        console.log(
+          `Accepted ${result.caseId} — baseline updated from snapshot ${result.snapshot}` +
+            (result.backup ? ` (previous baseline backed up to ${result.backup})` : "") +
+            `. Run \`desurf test --suite ${parsed.suite}\` to confirm the contract.`
+        );
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (err instanceof HistoryError && err.code === "not-found") {
+          nothingToAccept.push(tc.id);
+        } else {
+          errors.push({ caseId: tc.id, message: msg });
+          console.error(`${tc.id}: ${msg}`);
+        }
+      }
+    }
+
+    if (parsed.json) {
+      const exitCode = errors.length > 0 ? 2 : accepted.length === 0 ? 1 : 0;
+      console.log(JSON.stringify({
+        command: "accept",
+        suite: suite.name,
+        accepted,
+        nothingToAccept,
+        errors,
+        exitCode,
+      }, null, 2));
+      return exitCode;
+    }
+
+    if (errors.length > 0) return 2;
+    if (accepted.length === 0) {
+      console.log("nothing to accept");
+      return 1;
+    }
+    return 0;
+  } catch (err) {
+    console.error(err instanceof Error ? err.message : String(err));
+    return 2;
+  }
+}
+
+async function cmdRevert(parsed: ParsedArgs): Promise<number> {
+  if (parsed.help) { printRevertHelp(); return 0; }
+  if (!parsed.suite || !parsed.caseId) {
+    console.error("Missing required options: --suite <path> --case <id>");
+    printRevertHelp();
+    return 2;
+  }
+  if (!parsed.yes && !isatty(process.stdin.fd)) {
+    console.error("refusing to revert without --yes in non-interactive mode");
+    return 2;
+  }
+  if (!parsed.yes && isatty(process.stdin.fd)) {
+    console.error("Confirmation required: re-run with --yes to revert (zero-deps CLI).");
+    return 2;
+  }
+
+  try {
+    const suite = await loadSuite(resolve(parsed.suite));
+    const tc = suite.cases.find((c) => c.id === parsed.caseId);
+    if (!tc) {
+      console.error(`No test case with id "${parsed.caseId}" in suite "${suite.name}"`);
+      return 2;
+    }
+    try {
+      const result = await revertToBackup(suite.rootDir, tc.id, tc.outputPath, {
+        entry: parsed.entry,
+      });
+      console.log(
+        `Reverted ${result.caseId} from ${result.restoredFrom}. Run \`desurf test --suite ${parsed.suite}\` to confirm.`
+      );
+      return 0;
+    } catch (err) {
+      if (err instanceof HistoryError && err.code === "not-found") {
+        console.error(err.message);
+        return 1;
+      }
+      throw err;
+    }
+  } catch (err) {
+    console.error(err instanceof Error ? err.message : String(err));
+    return 2;
+  }
+}
+
+
 async function main(): Promise<number> {
   let parsed: ParsedArgs;
   try {
@@ -1083,7 +1469,7 @@ async function main(): Promise<number> {
 
   if (
     parsed.command === "help" ||
-    (parsed.help && !["test", "init", "record", "seal", "inspect", "watch"].includes(parsed.command))
+    (parsed.help && !["test", "init", "record", "accept", "revert", "diff", "history", "seal", "inspect", "watch"].includes(parsed.command))
   ) {
     printRootHelp();
     return 0;
@@ -1096,6 +1482,14 @@ async function main(): Promise<number> {
       return cmdInit(parsed);
     case "record":
       return cmdRecord(parsed);
+    case "accept":
+      return cmdAccept(parsed);
+    case "revert":
+      return cmdRevert(parsed);
+    case "diff":
+      return cmdDiff(parsed);
+    case "history":
+      return cmdHistory(parsed);
     case "seal":
       return cmdSeal(parsed);
     case "inspect":

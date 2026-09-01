@@ -7,7 +7,11 @@ Do not change the exit-code meanings without explicit approval.
 
 - `desurf test --suite <path>` — evaluate contract suite against saved cassettes (offline) or live model
 - `desurf init <directory>` — scaffold a new runnable suite (includes sealed example cassette)
-- `desurf record --suite <path> --provider openrouter` — capture live model responses and generate `.desurf` metadata
+- `desurf record --suite <path> --provider openrouter` — capture live output; propose drift (never mutates baseline unless `--force`)
+- `desurf accept --suite <path> [--case <id>|--all] --yes` — promote a history snapshot to the baseline
+- `desurf revert --suite <path> --case <id> --yes` — restore a baseline from a history backup
+- `desurf diff --suite <path> --case <id>` — inspect a pending record snapshot
+- `desurf history --suite <path>` — list cassette history snapshots
 - `desurf seal --suite <path>` — establish offline cassette provenance (`.desurf` metadata) for existing output files
 - `desurf watch --suite <path>` — re-run the suite whenever its files change (iteration loop)
 
@@ -200,3 +204,24 @@ Consumers can gate PRs with the composite Action at the repository root (`action
 - Exit codes are part of the public API and must remain stable.
 - Never log or print `OPENROUTER_API_KEY`.
 - `desurf seal` must never perform network I/O.
+
+## Drift-watch policy
+
+Scheduled live runs are **monitoring**, not merge gates. Exit-code semantics are unchanged (0/1/2). Classification of drift vs flaky vs infra MUST use the `--json` payload (`cases[].state`), never the exit code alone (exit 1 is REGRESSION or FLAKY).
+
+## Record / history exit codes (v0.5.0)
+
+### `desurf record`
+| Situation | Exit |
+|-----------|------|
+| Any case `error` | **2** |
+| No errors, ≥1 `drift` (propose mode) | **1** |
+| All cases `new` / `unchanged` | **0** |
+| `--force` or `--fill-gaps` | **2** on error, else **0** |
+
+### `desurf accept` / `desurf revert`
+| Situation | Exit |
+|-----------|------|
+| Success | **0** |
+| Nothing to accept/revert | **1** |
+| Integrity / missing `--yes` in non-TTY | **2** |

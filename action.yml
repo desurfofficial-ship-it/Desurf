@@ -1,52 +1,49 @@
-# Desurf — reusable offline CI gate (composite Action)
-#
-# Runs deterministic offline `desurf test` and propagates exit codes:
-#   0 = PASS (job succeeds)
-#   1 = REGRESSION / FLAKY (job fails)
-#   2 = ERROR (job fails)
-#
-# The Action installs the published npm package (not the Action checkout).
-# Action ref (uses: ...@ref) and npm package version are independent pins.
-#
-# Network is used only to install the npm package. The Desurf test gate itself
-# is offline: no live provider, no OPENROUTER_API_KEY, no record command.
-
+# Desurf — reusable CI gate (composite Action)
+# Default offline; optional live inputs for drift-watch.
 name: Desurf Offline Gate
 author: desurfofficial-ship-it
 description: >
-  Run offline Desurf regression tests against a committed suite.
-  Propagates Desurf exit codes 0/1/2 so GitHub Actions fails the job on
-  REGRESSION, FLAKY, or ERROR.
-
+  Run Desurf regression tests (offline by default). Optional live provider
+  inputs support scheduled drift-watch. Propagates exit codes 0/1/2.
 branding:
   icon: check-circle
   color: green
-
 inputs:
   suite:
-    description: >
-      Path to a Desurf suite directory (or suite.json), relative to the
-      consumer repository root ($GITHUB_WORKSPACE). Spaces are supported.
+    description: Path to Desurf suite directory (or suite.json)
     required: true
   version:
-    description: >
-      Published npm package version of @desurfofficial-ship-it/desurf to install
-      (e.g. "0.4.3"). Defaults to the current stable release. Do not use "latest".
-      Independent of the Action ref (uses: desurfofficial-ship-it/Desurf@...).
+    description: npm package version (explicit semver; never latest)
     required: false
-    default: "0.4.3"
+    default: "0.6.0"
   package-version:
-    description: >
-      Deprecated alias for `version`. Prefer `version`. If both are set, `version` wins.
+    description: Deprecated alias for version
     required: false
     default: ""
   node-version:
-    description: >
-      Node.js version for setup-node. Desurf requires Node >=18 (engines field).
-      Default 22 matches this repository's CI.
+    description: Node.js version (>=18)
     required: false
     default: "22"
-
+  provider:
+    description: Live provider (openrouter|openai|anthropic|gemini). Empty = offline.
+    required: false
+    default: ""
+  model:
+    description: Optional model id for live providers
+    required: false
+    default: ""
+  repeat:
+    description: --repeat for live runs (1-100)
+    required: false
+    default: "1"
+  timeout-ms:
+    description: Optional --timeout-ms for live providers
+    required: false
+    default: ""
+  max-retries:
+    description: Optional --max-retries for live providers
+    required: false
+    default: ""
 runs:
   using: composite
   steps:
@@ -54,68 +51,16 @@ runs:
       uses: actions/setup-node@v4
       with:
         node-version: ${{ inputs.node-version }}
-
-    - name: Run Desurf offline gate
+    - name: Run Desurf gate
       shell: bash
       env:
         DESURF_SUITE: ${{ inputs.suite }}
         DESURF_VERSION: ${{ inputs.version }}
         DESURF_PACKAGE_VERSION: ${{ inputs.package-version }}
         DESURF_NODE_VERSION: ${{ inputs.node-version }}
-      run: |
-        set -euo pipefail
-
-        VER="${DESURF_VERSION:-}"
-        if [ -z "$VER" ] && [ -n "${DESURF_PACKAGE_VERSION:-}" ]; then
-          VER="$DESURF_PACKAGE_VERSION"
-        fi
-        if [ -z "$VER" ] || [ "$VER" = "latest" ]; then
-          echo "Desurf Action error: package version must be an explicit semver (got '${VER:-empty}'). Do not use 'latest'." >&2
-          exit 2
-        fi
-
-        NODE_MAJOR=$(node -p "process.versions.node.split('.')[0]")
-        if [ "$NODE_MAJOR" -lt 18 ]; then
-          echo "Desurf Action error: Node >=18 required (got $(node -v); input node-version=${DESURF_NODE_VERSION:-})" >&2
-          exit 2
-        fi
-
-        SUITE="${DESURF_SUITE:-}"
-        if [ -z "$SUITE" ]; then
-          echo "Desurf Action error: input 'suite' is required" >&2
-          exit 2
-        fi
-
-        if [ ! -e "$SUITE" ]; then
-          echo "Desurf Action error: suite path not found: $SUITE" >&2
-          echo "(resolved under GITHUB_WORKSPACE=$(pwd))" >&2
-          exit 2
-        fi
-        SUITE_ABS=$(cd "$(dirname "$SUITE")" && pwd)/$(basename "$SUITE")
-        if [ ! -e "$SUITE_ABS" ]; then
-          echo "Desurf Action error: suite path not found after resolve: $SUITE_ABS" >&2
-          exit 2
-        fi
-
-        PKG="@desurfofficial-ship-it/desurf"
-        SPEC="${PKG}@${VER}"
-
-        INSTALL_DIR=$(mktemp -d)
-        cleanup() { rm -rf "$INSTALL_DIR"; }
-        trap cleanup EXIT
-
-        echo "Desurf offline gate"
-        echo "  package:  $SPEC"
-        echo "  suite:    $SUITE_ABS"
-        echo "  provider: offline (default)"
-        echo "  install:  $INSTALL_DIR (temporary; consumer workspace unchanged)"
-
-        npm install --prefix "$INSTALL_DIR" --no-save --no-package-lock "$SPEC"
-
-        DESURF_BIN="$INSTALL_DIR/node_modules/.bin/desurf"
-        if [ ! -x "$DESURF_BIN" ]; then
-          echo "Desurf Action error: desurf binary not found after install" >&2
-          exit 2
-        fi
-
-        "$DESURF_BIN" test --suite "$SUITE_ABS"
+        DESURF_PROVIDER: ${{ inputs.provider }}
+        DESURF_MODEL: ${{ inputs.model }}
+        DESURF_REPEAT: ${{ inputs.repeat }}
+        DESURF_TIMEOUT_MS: ${{ inputs.timeout-ms }}
+        DESURF_MAX_RETRIES: ${{ inputs.max-retries }}
+      run: bash "${{ github.action_path }}/action/run-gate.sh"
