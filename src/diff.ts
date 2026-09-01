@@ -13,7 +13,7 @@
  * truncated to keep CI logs bounded.
  */
 
-const MAX_DIFF_LINES = 200;
+const DEFAULT_MAX_DIFF_LINES = 200;
 
 /** Split text into lines, normalizing trailing newline handling. */
 function toLines(text: string): string[] {
@@ -36,8 +36,15 @@ function hunkRange(start: number, count: number): string {
 /**
  * Build a unified diff string between oldText and newText.
  * Returns "" when the texts are equal.
+ *
+ * @param maxLines Cap on emitted lines (default 200). Pass a larger value
+ *                 (e.g. 2000) for `desurf diff --full`.
  */
-export function unifiedDiff(oldText: string, newText: string): string {
+export function unifiedDiff(
+  oldText: string,
+  newText: string,
+  maxLines: number = DEFAULT_MAX_DIFF_LINES
+): string {
   const oldLines = toLines(oldText);
   const newLines = toLines(newText);
 
@@ -78,11 +85,11 @@ export function unifiedDiff(oldText: string, newText: string): string {
   }
 
   const total = out.length;
-  if (total > MAX_DIFF_LINES + 2) {
-    const kept = out.slice(0, MAX_DIFF_LINES);
-    kept.push(
-      `... diff truncated (${total - MAX_DIFF_LINES} more lines; run with --verbose for full output)`
-    );
+  const cap = maxLines > 0 ? maxLines : DEFAULT_MAX_DIFF_LINES;
+  if (total > cap) {
+    const kept = out.slice(0, cap);
+    const remaining = total - cap;
+    kept.push(`... (${remaining} more lines truncated)`);
     return kept.join("\n");
   }
   return out.join("\n");

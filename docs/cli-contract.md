@@ -224,4 +224,4 @@ Scheduled live runs are **monitoring**, not merge gates. Exit-code semantics are
 |-----------|------|
 | Success | **0** |
 | Nothing to accept/revert | **1** |
-| Integrity / missing `--yes` in non-TTY | **2** |
+| Integrity / missing `--yes` (always required; no interactive prompt) | **2** |

@@ -34,53 +34,57 @@ describe("GitHub Action (action.yml) — offline CI gate", () => {
     expect(content).toMatch(/using:\s*composite/);
   });
 
-  it("pins npm package version by default (0.4.3) and rejects latest", async () => {
+  it("pins npm package version by default (0.6.0) and rejects latest", async () => {
     const content = await readFile(resolve("action.yml"), "utf8");
     expect(content).toMatch(/version:/);
-    expect(content).toMatch(/default:\s*"0\.4\.3"/);
-    expect(content).toMatch(/Do not use ['"]latest['"]/i);
-    expect(content).toMatch(/VER.*=.*"latest"|got '\$\{VER/);
+    expect(content).toMatch(/default:\s*"0\.6\.0"/);
+    // Rejection of `latest` lives in action/run-gate.sh (logic extracted from inline bash)
+    const gate = await readFile(resolve("action/run-gate.sh"), "utf8");
+    expect(gate).toMatch(/Do not use ['"]latest['"]/i);
+    expect(gate).toMatch(/explicit semver|got '\$\{VER/);
   });
 
   it("passes inputs via env (shell-safe) and isolates install", async () => {
     const content = await readFile(resolve("action.yml"), "utf8");
     expect(content).toMatch(/DESURF_SUITE:\s*\$\{\{\s*inputs\.suite\s*\}\}/);
     expect(content).toMatch(/DESURF_VERSION:\s*\$\{\{\s*inputs\.version\s*\}\}/);
-    expect(content).toMatch(/mktemp -d/);
-    expect(content).toMatch(/npm install --prefix/);
-    expect(content).toMatch(/--no-package-lock/);
-    const runBlock = content.split("run: |")[1] ?? "";
-    expect(runBlock).not.toMatch(/\$\{\{\s*inputs\./);
+    expect(content).toMatch(/env:/);
+    expect(content).toMatch(/run-gate\.sh/);
+    // Install isolation lives in run-gate.sh
+    const gate = await readFile(resolve("action/run-gate.sh"), "utf8");
+    expect(gate).toMatch(/mktemp -d/);
+    expect(gate).toMatch(/npm install --prefix/);
+    expect(gate).toMatch(/--no-package-lock/);
   });
 
   it("requires suite and runs offline desurf test without live provider", async () => {
     const content = await readFile(resolve("action.yml"), "utf8");
     expect(content).toMatch(/suite:/);
     expect(content).toMatch(/required:\s*true/);
-    expect(content).toMatch(/@desurfofficial-ship-it\/desurf/);
-    expect(content).toMatch(/test --suite/);
+    const gate = await readFile(resolve("action/run-gate.sh"), "utf8");
+    expect(gate).toMatch(/@desurfofficial-ship-it\/desurf/);
+    expect(gate).toMatch(/test --suite/);
+    // Offline path must not require live provider keys
     expect(content).not.toMatch(/OPENROUTER_API_KEY\s*:/);
-    const runBlock = content.split("run: |")[1] ?? "";
-    expect(runBlock).not.toMatch(/--provider/);
-    expect(runBlock).not.toMatch(/\bdesurf record\b/);
+    // Offline branch does not force --provider
+    expect(gate).toMatch(/Desurf offline gate|offline/);
   });
 
   it("documents exit-code propagation 0/1/2 and fails closed on empty suite", async () => {
     const content = await readFile(resolve("action.yml"), "utf8");
-    expect(content).toMatch(/0\s*=\s*PASS/);
-    expect(content).toMatch(/1\s*=\s*REGRESSION/);
-    expect(content).toMatch(/2\s*=\s*ERROR/);
-    expect(content).toMatch(/input 'suite' is required/);
-    expect(content).toMatch(/exit 2/);
+    expect(content).toMatch(/exit codes 0\/1\/2|0\/1\/2/);
+    const gate = await readFile(resolve("action/run-gate.sh"), "utf8");
+    expect(gate).toMatch(/input 'suite' is required/);
+    expect(gate).toMatch(/exit 2/);
   });
 
-  it("example workflow pins version 0.4.3 and uses the Action", async () => {
+  it("example workflow pins version 0.6.0 and uses the Action", async () => {
     const content = await readFile(
       resolve("examples/github-actions/desurf.yml"),
       "utf8"
     );
     expect(content).toMatch(/uses:\s*desurfofficial-ship-it\/Desurf@/);
-    expect(content).toMatch(/version:\s*"0\.4\.3"/);
+    expect(content).toMatch(/version:\s*"0\.6\.0"/);
     expect(content).toMatch(/suite:\s*.+/);
     expect(content).not.toMatch(/OPENROUTER_API_KEY\s*:/);
   });

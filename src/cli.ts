@@ -1181,13 +1181,12 @@ function printAcceptHelp(): void {
 Usage:
   desurf accept --suite <path> [--case <id> | --all] [--entry <n|file>] [--yes] [--json]
 
-Without --yes, confirmation is required when stdin is a TTY.
-In non-interactive mode, --yes is required (exit 2 otherwise).
+--yes is always required (no interactive prompt; zero-dependency policy).
 
 Exit codes:
   0  every requested case accepted
   1  nothing to accept
-  2  integrity / config / missing --yes in non-TTY
+  2  integrity / config / missing --yes
 `);
 }
 
@@ -1197,10 +1196,12 @@ function printRevertHelp(): void {
 Usage:
   desurf revert --suite <path> --case <id> [--entry <n|file>] [--yes]
 
+--yes is always required (no interactive prompt; zero-dependency policy).
+
 Exit codes:
   0  restored
   1  nothing to revert
-  2  integrity / config / missing --yes in non-TTY
+  2  integrity / config / missing --yes
 `);
 }
 
@@ -1300,8 +1301,7 @@ async function cmdDiff(parsed: ParsedArgs): Promise<number> {
       console.log("\n(no baseline on disk — showing snapshot output only)\n");
       console.log(snapshot.output);
     } else {
-      // unifiedDiff has fixed 200-line cap; --full note for future
-      const d = unifiedDiff(baselineText, snapshot.output);
+      const d = unifiedDiff(baselineText, snapshot.output, parsed.full ? 2000 : 200);
       console.log("\n" + (d || "(no textual diff — outputs equal after normalization)"));
     }
     return 0;
