@@ -1,10 +1,12 @@
 /**
  * Test runner (Stage 2 — supports --repeat N).
  * Orchestrates loader → provider → engine → reliability classifier.
+ * B3: multi-turn conversation execution (D4/D5/D10).
  */
 
 import { readFile } from "node:fs/promises";
 import { evaluateTestCase } from "./engine.js";
+import { evaluateAssertions } from "./assertions.js";
 import { loadSuite } from "./offline.js";
 import {
   assertCassetteFresh,
@@ -16,6 +18,7 @@ import { unifiedDiff } from "./diff.js";
 import { SavedOutputAdapter } from "./provider.js";
 import { summarizeCase, validateRepeat } from "./repeat.js";
 import type {
+  AssertionResult,
   CaseReliability,
   ModelAdapter,
   Suite,
@@ -26,123 +29,261 @@ import type {
 export type RunOptions = {
   suitePath: string;
   caseId?: string;
-  /** Number of times to execute each case. Default 1. */
   repeat?: number;
   provider?: ModelAdapter;
 };
 
 export type RunSummary = {
   suiteName: string;
-  /** One entry per test case (after all repeats). */
   cases: CaseReliability[];
   passed: number;
   flaky: number;
   regression: number;
   errors: number;
-  /** Non-fatal warnings (soft cassette drift). Run still passes (exit 0). */
   warnings: number;
 };
+
+const PREVIEW_MAX = 200;
+
+function preview(text: string): string {
+  const t = text.replace(/\s+/g, " ").trim();
+  if (t.length <= PREVIEW_MAX) return t;
+  return t.slice(0, PREVIEW_MAX) + "…";
+}
+
+async function runSingleTurn(
+  testCase: TestCase,
+  provider: ModelAdapter
+): Promise<TestResult> {
+  if (!testCase.input) {
+    throw new Error(`Case "${testCase.id}" missing input path`);
+  }
+  const [inputText, promptText] = await Promise.all([
+    readFile(testCase.input, "utf8"),
+    readFile(testCase.prompt, "utf8"),
+  ]);
+
+  let driftWarning: string | undefined;
+  let driftMeta:
+    | {
+        state: "soft";
+        promptStale: boolean;
+        inputStale: boolean;
+        cassetteState: "recorded";
+        message: string;
+      }
+    | undefined;
+  let savedOutput: string | undefined;
+
+  if (provider instanceof SavedOutputAdapter) {
+    const freshness = await checkCassetteFresh(
+      testCase.outputPath,
+      inputText,
+      promptText
+    );
+    if (!freshness.fresh && freshness.severity === "soft") {
+      const parts: string[] = [];
+      if (freshness.promptStale) {
+        parts.push("Prompt changed since output was recorded.");
+      }
+      if (freshness.inputStale) {
+        parts.push("Input changed since output was recorded.");
+      }
+      driftWarning =
+        parts.join(" ") +
+        " Evaluating against a drifted recorded baseline. " +
+        "Re-capture with `desurf record --force` or re-seal with `desurf seal --force` to refresh.";
+      driftMeta = {
+        state: "soft",
+        promptStale: freshness.promptStale,
+        inputStale: freshness.inputStale,
+        cassetteState: "recorded",
+        message: driftWarning,
+      };
+    } else {
+      await assertCassetteFresh(testCase.outputPath, inputText, promptText);
+    }
+  }
+
+  const output = await provider.execute({
+    input: inputText,
+    prompt: promptText,
+    outputPath: testCase.outputPath,
+  });
+
+  if (savedOutput === undefined) {
+    try {
+      savedOutput = await readFile(testCase.outputPath, "utf8");
+    } catch {
+      savedOutput = undefined;
+    }
+  }
+
+  if (provider instanceof SavedOutputAdapter) {
+    await verifyCassetteOutput(testCase.outputPath, output.text);
+  }
+
+  const result = evaluateTestCase(testCase, output);
+
+  if (driftWarning) {
+    result.warnings = [driftWarning];
+    result.drift = driftMeta;
+  }
+
+  if (savedOutput !== undefined && savedOutput !== output.text) {
+    result.diff = unifiedDiff(savedOutput, output.text);
+  }
+
+  return result;
+}
+
+async function runMultiTurn(
+  testCase: TestCase,
+  provider: ModelAdapter
+): Promise<TestResult> {
+  const turns = testCase.turns!;
+  const promptText = await readFile(testCase.prompt, "utf8");
+  const firstUserText = await readFile(turns[0]!.user, "utf8");
+  let driftWarning: string | undefined;
+  let driftMeta: TestResult["drift"];
+
+  if (provider instanceof SavedOutputAdapter) {
+    const freshness = await checkCassetteFresh(
+      testCase.outputPath,
+      firstUserText,
+      promptText
+    );
+    if (!freshness.fresh && freshness.severity === "soft") {
+      driftWarning =
+        "Prompt or turn user file changed since output was recorded. " +
+        "Evaluating against a drifted recorded baseline. " +
+        "Re-capture with `desurf record --force` or re-seal with `desurf seal --force` to refresh.";
+      driftMeta = {
+        state: "soft",
+        promptStale: freshness.promptStale,
+        inputStale: freshness.inputStale,
+        cassetteState: "recorded",
+        message: driftWarning,
+      };
+    } else if (!freshness.fresh) {
+      await assertCassetteFresh(testCase.outputPath, firstUserText, promptText);
+    }
+
+    try {
+      const raw = await readFile(testCase.outputPath, "utf8");
+      const parsed = JSON.parse(raw) as { turns?: unknown[] };
+      if (!Array.isArray(parsed.turns) || parsed.turns.length !== turns.length) {
+        throw new Error(
+          `Transcript turn count mismatch at ${testCase.outputPath}: ` +
+            `case has ${turns.length} turns, transcript has ${Array.isArray(parsed.turns) ? parsed.turns.length : "none"}`
+        );
+      }
+    } catch (err) {
+      if (err instanceof SyntaxError) {
+        throw new Error(
+          `Malformed transcript at ${testCase.outputPath}: ${err.message}`
+        );
+      }
+      throw err;
+    }
+  }
+
+  type HistItem = { role: "user" | "assistant"; content: string };
+  const history: HistItem[] = [];
+  const turnResults: NonNullable<TestResult["turns"]> = [];
+  const allAssertionResults: AssertionResult[] = [];
+  let providerError: string | undefined;
+
+  for (let i = 0; i < turns.length; i++) {
+    const turn = turns[i]!;
+    const userText = await readFile(turn.user, "utf8");
+
+    let outputText: string;
+    try {
+      const output = await provider.execute({
+        input: userText,
+        prompt: promptText,
+        outputPath: testCase.outputPath,
+        history: history.length > 0 ? [...history] : undefined,
+        turnIndex: i,
+      });
+      outputText = output.text;
+    } catch (err) {
+      providerError = err instanceof Error ? err.message : String(err);
+      turnResults.push({
+        index: i,
+        passed: false,
+        assertionResults: [],
+        error: providerError,
+      });
+      break;
+    }
+
+    const turnAssertions = turn.assertions ?? [];
+    const turnAresults = evaluateAssertions(turnAssertions, { text: outputText });
+    for (const ar of turnAresults) {
+      ar.turnIndex = i;
+    }
+    const turnPassed = turnAresults.every((r) => r.passed);
+    allAssertionResults.push(...turnAresults);
+    turnResults.push({
+      index: i,
+      passed: turnPassed,
+      assertionResults: turnAresults,
+      outputPreview: preview(outputText),
+    });
+
+    history.push({ role: "user", content: userText });
+    history.push({ role: "assistant", content: outputText });
+  }
+
+  if (providerError) {
+    return {
+      caseId: testCase.id,
+      passed: false,
+      assertionResults: allAssertionResults,
+      error: providerError,
+      turns: turnResults,
+      warnings: driftWarning ? [driftWarning] : undefined,
+      drift: driftMeta,
+    };
+  }
+
+  const lastOutput =
+    history.filter((h) => h.role === "assistant").pop()?.content ?? "";
+  const caseAresults = evaluateAssertions(testCase.assertions, {
+    text: lastOutput,
+  });
+  allAssertionResults.push(...caseAresults);
+
+  const allTurnsPassed = turnResults.every((t) => t.passed);
+  const caseLevelPassed = caseAresults.every((r) => r.passed);
+  const passed = allTurnsPassed && caseLevelPassed;
+
+  const result: TestResult = {
+    caseId: testCase.id,
+    passed,
+    assertionResults: allAssertionResults,
+    outputPreview: preview(lastOutput),
+    turns: turnResults,
+  };
+  if (driftWarning) {
+    result.warnings = [driftWarning];
+    result.drift = driftMeta;
+  }
+
+  return result;
+}
 
 async function runOneExecution(
   testCase: TestCase,
   provider: ModelAdapter
 ): Promise<TestResult> {
   try {
-    const [inputText, promptText] = await Promise.all([
-      readFile(testCase.input, "utf8"),
-      readFile(testCase.prompt, "utf8"),
-    ]);
-
-    let driftWarning: string | undefined;
-    let driftMeta:
-      | { state: "soft"; promptStale: boolean; inputStale: boolean; cassetteState: "recorded"; message: string }
-      | undefined;
-    let savedOutput: string | undefined;
-
-    // Stale-fixture check only applies offline (saved cassette evaluation).
-    if (provider instanceof SavedOutputAdapter) {
-      const freshness = await checkCassetteFresh(
-        testCase.outputPath,
-        inputText,
-        promptText
-      );
-      if (!freshness.fresh && freshness.severity === "soft") {
-        // Recorded baseline drifted (prompt/input changed since capture).
-        // This is a WARNING, not an ERROR: the cassette still stands as
-        // the "old" side of the comparison and assertions still run.
-        const parts: string[] = [];
-        if (freshness.promptStale) {
-          parts.push("Prompt changed since output was recorded.");
-        }
-        if (freshness.inputStale) {
-          parts.push("Input changed since output was recorded.");
-        }
-        // The warning text itself carries no "WARNING:" prefix — the
-        // formatter adds exactly one prefix per line. (v0.4.3: previously
-        // the message embedded a second "WARNING:" prefix, which produced
-        // duplicated prefixes in human output.)
-        driftWarning =
-          parts.join(" ") +
-          " Evaluating against a drifted recorded baseline. " +
-          "Re-capture with `desurf record --force` or re-seal with `desurf seal --force` to refresh.";
-        // Structured drift metadata so --json consumers can tell a
-        // contract PASS from a clean PASS: the contract passed, but the
-        // baseline drifted (and exactly which side changed).
-        driftMeta = {
-          state: "soft",
-          promptStale: freshness.promptStale,
-          inputStale: freshness.inputStale,
-          cassetteState: "recorded",
-          message: driftWarning,
-        };
-      } else {
-        // Hard drift (sealed/legacy): refuse to evaluate — ERROR (exit 2).
-        await assertCassetteFresh(testCase.outputPath, inputText, promptText);
-      }
+    if (testCase.turns && testCase.turns.length > 0) {
+      return await runMultiTurn(testCase, provider);
     }
-
-    const output = await provider.execute({
-      input: inputText,
-      prompt: promptText,
-      outputPath: testCase.outputPath,
-    });
-
-    // Best-effort read of the saved cassette (offline OR live-provider
-    // runs): it becomes the "old" side of the P5 regression diff. When
-    // the provider IS the saved output, this is the output being
-    // evaluated; when it is a live provider, it is the baseline the new
-    // output is compared against.
-    if (savedOutput === undefined) {
-      try {
-        savedOutput = await readFile(testCase.outputPath, "utf8");
-      } catch {
-        savedOutput = undefined; // no cassette on disk (fresh live run)
-      }
-    }
-
-    // Authenticate the cassette itself (v2 sidecars): without this, an
-    // output file edited after sealing would be evaluated as if it were
-    // the sealed bytes, with provenance still reporting "fresh".
-    if (provider instanceof SavedOutputAdapter) {
-      await verifyCassetteOutput(testCase.outputPath, output.text);
-    }
-
-    const result = evaluateTestCase(testCase, output);
-
-    if (driftWarning) {
-      result.warnings = [driftWarning];
-      result.drift = driftMeta;
-    }
-
-    // Diff on regression (P5): when the evaluated output differs from the
-    // saved cassette, show old-vs-new. This applies to live-provider runs
-    // against a saved cassette AND offline evaluation after a soft drift
-    // (where the fresh prompt produced a different saved output).
-    if (savedOutput !== undefined && savedOutput !== output.text) {
-      result.diff = unifiedDiff(savedOutput, output.text);
-    }
-
-    return result;
+    return await runSingleTurn(testCase, provider);
   } catch (err) {
     return {
       caseId: testCase.id,
@@ -156,10 +297,6 @@ async function runOneExecution(
 export async function runSuite(options: RunOptions): Promise<RunSummary> {
   const suite: Suite = await loadSuite(options.suitePath);
   const provider = options.provider ?? new SavedOutputAdapter();
-  // Enforce the same ceiling as the CLI for library callers: a repeat
-  // count that is not a positive integer within the cap is a programming
-  // error and must fail loudly, not silently pin the CPU for a week.
-  // (Previously `Math.max(1, repeat)` quietly turned 0/-7/NaN into 1.)
   const repeat = validateRepeat(options.repeat ?? 1);
 
   let cases = suite.cases;

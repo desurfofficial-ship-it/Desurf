@@ -6,7 +6,7 @@
 
 import { readFile, stat } from "node:fs/promises";
 import { resolve, dirname, isAbsolute, relative, sep } from "node:path";
-import type { Assertion, Suite, TestCase } from "./types.js";
+import type { Assertion, Suite, TestCase, TurnDef } from "./types.js";
 
 type RawAssertion = {
   type: string;
@@ -413,15 +413,6 @@ export async function loadSuite(suitePath: string): Promise<Suite> {
           `Numeric or boolean ids cannot be selected with --case and break report correlation.`
       );
     }
-    // input / prompt / output must be non-empty strings. A number or
-    // boolean would slip through the old truthy check (`!c.input` is false
-    // for `123`), then crash resolveCasePath with a non-string argument
-    // later. Validate at the boundary.
-    if (typeof c.input !== "string" || c.input.length === 0) {
-      throw new Error(
-        `Case "${c.id}" field "input" must be a non-empty string (got ${JSON.stringify(c.input)})`
-      );
-    }
     if (typeof c.prompt !== "string" || c.prompt.length === 0) {
       throw new Error(
         `Case "${c.id}" field "prompt" must be a non-empty string (got ${JSON.stringify(c.prompt)})`
@@ -443,19 +434,107 @@ export async function loadSuite(suitePath: string): Promise<Suite> {
       );
     }
     seenIds.add(c.id);
-    if (c.assertions.length === 0) {
+
+    const hasTurns = c.turns !== undefined;
+    const hasInput = c.input !== undefined && c.input !== null && c.input !== "";
+
+    if (hasTurns && hasInput) {
+      throw new Error(
+        `Case "${c.id}" has both "input" and "turns" — they are mutually exclusive (exit 2). ` +
+          `Use "input" for single-turn cases, or "turns" for multi-turn conversations.`
+      );
+    }
+
+    let turns: TurnDef[] | undefined;
+    if (hasTurns) {
+      if (!Array.isArray(c.turns)) {
+        throw new Error(
+          `Case "${c.id}" field "turns" must be an array (got ${typeof c.turns})`
+        );
+      }
+      if (c.turns.length === 0) {
+        throw new Error(
+          `Case "${c.id}" field "turns" must have 1–20 entries (got 0)`
+        );
+      }
+      if (c.turns.length > 20) {
+        throw new Error(
+          `Case "${c.id}" field "turns" exceeds the 20-turn cap (got ${c.turns.length})`
+        );
+      }
+      if (!String(c.output).endsWith(".json")) {
+        throw new Error(
+          `Case "${c.id}" uses "turns" but output "${c.output}" does not end in .json ` +
+            `(transcript cassette required)`
+        );
+      }
+      const TURN_ALLOWED = new Set(["user", "assertions"]);
+      turns = c.turns.map((rawTurn: unknown, ti: number) => {
+        if (rawTurn === null || typeof rawTurn !== "object" || Array.isArray(rawTurn)) {
+          throw new Error(`Case "${c.id}" turns[${ti}] must be an object`);
+        }
+        const tr = rawTurn as Record<string, unknown>;
+        const unknown = Object.keys(tr).filter((k) => !TURN_ALLOWED.has(k));
+        if (unknown.length > 0) {
+          throw new Error(
+            `Case "${c.id}" turns[${ti}] has unknown field(s): ${unknown.map((k) => `"${k}"`).join(", ")}. ` +
+              `Allowed: user, assertions`
+          );
+        }
+        if (typeof tr.user !== "string" || tr.user.length === 0) {
+          throw new Error(
+            `Case "${c.id}" turns[${ti}].user must be a non-empty path string`
+          );
+        }
+        let turnAssertions: Assertion[] | undefined;
+        if (tr.assertions !== undefined) {
+          if (!Array.isArray(tr.assertions)) {
+            throw new Error(
+              `Case "${c.id}" turns[${ti}].assertions must be an array`
+            );
+          }
+          turnAssertions = tr.assertions.map((a: unknown) =>
+            parseAssertion(a as RawAssertion)
+          );
+        }
+        return {
+          user: resolveCasePath(rootDir, tr.user, "user", c.id, suiteFile),
+          assertions: turnAssertions,
+        };
+      });
+    } else {
+      if (typeof c.input !== "string" || c.input.length === 0) {
+        throw new Error(
+          `Case "${c.id}" field "input" must be a non-empty string (got ${JSON.stringify(c.input)})`
+        );
+      }
+    }
+
+    const assertions = c.assertions.map((a: unknown) =>
+      parseAssertion(a as RawAssertion)
+    );
+    const turnAssertionCount = (turns ?? []).reduce(
+      (n, tr) => n + (tr.assertions?.length ?? 0),
+      0
+    );
+    if (assertions.length === 0 && turnAssertionCount === 0) {
       throw new Error(
         `Case "${c.id}" has no assertions. A contract with zero assertions passes any output — add at least one assertion.`
       );
     }
 
-    return {
+    const result: TestCase = {
       id: c.id,
-      input: resolveCasePath(rootDir, c.input, "input", c.id, suiteFile),
       prompt: resolveCasePath(rootDir, c.prompt, "prompt", c.id, suiteFile),
       outputPath: resolveCasePath(rootDir, c.output, "output", c.id, suiteFile),
-      assertions: c.assertions.map((a: unknown) => parseAssertion(a as RawAssertion)),
+      assertions,
     };
+    if (turns) {
+      result.turns = turns;
+    } else {
+      result.input = resolveCasePath(rootDir, c.input, "input", c.id, suiteFile);
+    }
+    return result;
   });
 
   return {

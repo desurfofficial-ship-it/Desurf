@@ -111,8 +111,12 @@ async function recordOne(
       };
     }
 
+    const inputPath = testCase.input ?? testCase.turns?.[0]?.user;
+    if (!inputPath) {
+      return { caseId, status: "error", verdict: "error", message: `Case "${caseId}" has no input path (and no turns)` };
+    }
     const [inputText, promptText] = await Promise.all([
-      readFile(testCase.input, "utf8"),
+      readFile(inputPath, "utf8"),
       readFile(testCase.prompt, "utf8"),
     ]);
 

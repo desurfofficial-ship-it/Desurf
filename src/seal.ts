@@ -70,8 +70,12 @@ async function sealOne(
       };
     }
 
+    const inputPath = testCase.input ?? testCase.turns?.[0]?.user;
+    if (!inputPath) {
+      return { caseId: testCase.id, status: "error", message: `Case "${testCase.id}" has no input path (and no turns)` };
+    }
     const [inputText, promptText, outputText] = await Promise.all([
-      readFile(testCase.input, "utf8"),
+      readFile(inputPath, "utf8"),
       readFile(testCase.prompt, "utf8"),
       readFile(testCase.outputPath, "utf8"),
     ]);

@@ -1357,7 +1357,7 @@ async function cmdAccept(parsed: ParsedArgs): Promise<number> {
           suite.rootDir,
           tc.id,
           tc.outputPath,
-          tc.input,
+          tc.input ?? tc.turns?.[0]?.user ?? "",
           tc.prompt,
           {
             entry: parsed.entry,

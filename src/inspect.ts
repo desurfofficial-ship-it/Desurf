@@ -96,8 +96,12 @@ async function inspectOne(testCase: TestCase): Promise<CaseInspectResult> {
   }
 
   const cassetteState = cassetteStateFromMeta(meta);
+  const inputPath = testCase.input ?? testCase.turns?.[0]?.user;
+  if (!inputPath) {
+    throw new Error(`Case "${testCase.id}" has no input path (and no turns)`);
+  }
   const [inputText, promptText] = await Promise.all([
-    readFile(testCase.input, "utf8"),
+    readFile(inputPath, "utf8"),
     readFile(testCase.prompt, "utf8"),
   ]);
 

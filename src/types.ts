@@ -10,14 +10,32 @@ export type Assertion =
   | { type: "regex"; pattern: string; flags?: string }
   | { type: "json_schema"; schema: Record<string, unknown> };
 
+/** One user turn in a multi-turn conversation case. */
+export type TurnDef = {
+  /** Absolute path to the user message file (resolved under suite root). */
+  user: string;
+  /** Optional per-turn assertions (evaluated against this turn's output only). */
+  assertions?: Assertion[];
+};
+
 /** One test case from a suite. */
 export type TestCase = {
   id: string;
-  input: string;
+  /**
+   * Absolute path to the single-turn input file.
+   * Absent when `turns` is set (D2: input and turns are mutually exclusive).
+   */
+  input?: string;
   prompt: string;
   /** Path relative to the suite directory; must resolve inside it (loader rejects absolute paths and `..` escapes). */
   outputPath: string;
+  /** Case-level assertions — evaluated against the last turn's output when `turns` is set. */
   assertions: Assertion[];
+  /**
+   * Optional multi-turn conversation (1–20 turns).
+   * When present, `input` must be absent and `outputPath` must end in `.json` (transcript).
+   */
+  turns?: TurnDef[];
 };
 
 /** A suite loaded from disk. */
@@ -41,6 +59,8 @@ export type AssertionResult = {
   assertion: Assertion;
   passed: boolean;
   message: string;
+  /** Present when the assertion was evaluated against a specific conversation turn. */
+  turnIndex?: number;
 };
 
 /** Result of evaluating one test case (one execution). */
@@ -78,7 +98,20 @@ export type TestResult = {
     inputStale: boolean;
     cassetteState: "recorded";
     message: string;
+    /** First stale turn index when a turns-case user file drifted (D6). */
+    staleTurnIndex?: number;
   };
+  /**
+   * Per-turn results for multi-turn cases (D9). Present only when the case
+   * has `turns`. Case `passed` is every turn passed AND case-level assertions.
+   */
+  turns?: Array<{
+    index: number;
+    passed: boolean;
+    assertionResults: AssertionResult[];
+    outputPreview?: string;
+    error?: string;
+  }>;
 };
 
 /**
@@ -116,6 +149,15 @@ export type ExecuteRequest = {
   outputPath?: string;
   /** Optional model id override */
   model?: string;
+  /**
+   * Prior conversation turns for multi-turn cases (D4).
+   * Ordered as u0, a0, u1, a1, … before the current user `input`.
+   */
+  history?: Array<{ role: "user" | "assistant"; content: string }>;
+  /**
+   * Zero-based turn index for offline transcript replay.
+   */
+  turnIndex?: number;
   /**
    * Optional system prompt prepended to the user message. Most production
    * prompts are system-shaped ("You are a JSON-only classifier..."); without
