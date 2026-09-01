@@ -8,7 +8,16 @@ export type Assertion =
   | { type: "required"; value: string; caseSensitive?: boolean }
   | { type: "forbidden"; value: string; caseSensitive?: boolean }
   | { type: "regex"; pattern: string; flags?: string }
-  | { type: "json_schema"; schema: Record<string, unknown> };
+  | { type: "json_schema"; schema: Record<string, unknown> }
+  | { type: "max_diff_lines"; value: number }
+  | {
+      type: "json_path";
+      path: string;
+      equals?: unknown;
+      oneOf?: unknown[];
+      min?: number;
+      max?: number;
+    };
 
 /** One user turn in a multi-turn conversation case. */
 export type TurnDef = {

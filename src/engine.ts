@@ -4,7 +4,7 @@
  * No I/O, no CLI knowledge.
  */
 
-import { evaluateAssertions } from "./assertions.js";
+import { evaluateAssertions, type AssertionEvalContext } from "./assertions.js";
 import type { ModelOutput, TestCase, TestResult } from "./types.js";
 
 const PREVIEW_MAX = 200;
@@ -17,9 +17,10 @@ function preview(text: string): string {
 
 export function evaluateTestCase(
   testCase: TestCase,
-  output: ModelOutput
+  output: ModelOutput,
+  ctx?: AssertionEvalContext
 ): TestResult {
-  const assertionResults = evaluateAssertions(testCase.assertions, output);
+  const assertionResults = evaluateAssertions(testCase.assertions, output, ctx);
   const passed = assertionResults.every((r) => r.passed);
 
   return {

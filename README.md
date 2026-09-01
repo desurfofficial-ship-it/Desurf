@@ -150,7 +150,7 @@ Exit codes: **0** PASS · **1** REGRESSION/FLAKY · **2** ERROR
 
 ## Assertions
 
-`required`, `forbidden` (optional `caseSensitive: false`), `regex`, `json_schema` (minimal: `type`, `required`, `properties.*.const`, `properties.*.enum` against **parsed** JSON).
+`required`, `forbidden` (optional `caseSensitive: false`), `regex`, `json_schema`, `max_diff_lines`, `json_path` (minimal: `type`, `required`, `properties.*.const`, `properties.*.enum` against **parsed** JSON).
 
 Unknown assertion fields are rejected (exit 2).
 

@@ -28,6 +28,8 @@ const ALLOWED_FIELDS: Record<string, Set<string>> = {
   forbidden: new Set(["type", "value", "caseSensitive"]),
   regex: new Set(["type", "pattern", "flags"]),
   json_schema: new Set(["type", "schema"]),
+  max_diff_lines: new Set(["type", "value"]),
+  json_path: new Set(["type", "path", "equals", "oneOf", "min", "max"]),
 };
 
 const SUPPORTED_PROPERTY_TYPES = new Set([
@@ -187,6 +189,44 @@ function validatePropertySchema(
   }
 }
 
+
+/** Validate json_path syntax at load time (malformed → config error). */
+function assertValidJsonPathSyntax(path: string): void {
+  let p = path.trim();
+  if (p.startsWith("$.")) p = p.slice(2);
+  else if (p === "$") return;
+  if (p.length === 0) throw new Error(`json_path "path" is empty`);
+  // Reject empty segments, trailing dots, non-numeric brackets, unclosed brackets.
+  if (p.includes("..") || p.endsWith(".") || p.startsWith(".") || p.startsWith("[")) {
+    throw new Error(`json_path malformed path: "${path}"`);
+  }
+  let i = 0;
+  while (i < p.length) {
+    if (p[i] === ".") {
+      i++;
+      if (i >= p.length || p[i] === "." || p[i] === "[") {
+        throw new Error(`json_path malformed path: "${path}"`);
+      }
+      continue;
+    }
+    if (p[i] === "[") {
+      const close = p.indexOf("]", i);
+      if (close < 0) throw new Error(`json_path malformed path: "${path}"`);
+      const idx = p.slice(i + 1, close);
+      if (!/^\d+$/.test(idx)) throw new Error(`json_path malformed path: "${path}"`);
+      i = close + 1;
+      continue;
+    }
+    let j = i;
+    while (j < p.length && p[j] !== "." && p[j] !== "[") j++;
+    const key = p.slice(i, j);
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) {
+      throw new Error(`json_path malformed path: "${path}"`);
+    }
+    i = j;
+  }
+}
+
 export function parseAssertion(raw: RawAssertion): Assertion {
   if (!raw || typeof raw !== "object" || typeof raw.type !== "string") {
     throw new Error(`Assertion must be an object with a string "type"`);
@@ -264,6 +304,59 @@ export function parseAssertion(raw: RawAssertion): Assertion {
       }
       validateJsonSchemaShape(raw.schema);
       return { type: "json_schema", schema: raw.schema };
+    case "max_diff_lines": {
+      if (typeof raw.value !== "number" || !Number.isInteger(raw.value) || raw.value < 0) {
+        throw new Error(
+          `max_diff_lines "value" must be an integer ≥ 0 (got ${JSON.stringify(raw.value)})`
+        );
+      }
+      return { type: "max_diff_lines", value: raw.value };
+    }
+    case "json_path": {
+      if (typeof raw.path !== "string" || raw.path.trim().length === 0) {
+        throw new Error(`json_path assertion needs a non-empty string "path"`);
+      }
+      assertValidJsonPathSyntax(raw.path);
+      const hasEquals = Object.hasOwn(raw, "equals");
+      const hasOneOf = Object.hasOwn(raw, "oneOf");
+      const hasMin = Object.hasOwn(raw, "min");
+      const hasMax = Object.hasOwn(raw, "max");
+      const groups = [hasEquals, hasOneOf, hasMin || hasMax].filter(Boolean).length;
+      if (groups === 0) {
+        throw new Error(
+          `json_path needs exactly one comparison: equals, oneOf, or min/max`
+        );
+      }
+      if (groups > 1) {
+        throw new Error(
+          `json_path comparison fields are mutually exclusive (equals | oneOf | min/max)`
+        );
+      }
+      if (hasOneOf) {
+        if (!Array.isArray(raw.oneOf) || (raw.oneOf as unknown[]).length === 0) {
+          throw new Error(`json_path "oneOf" must be a non-empty array`);
+        }
+      }
+      if (hasMin && typeof raw.min !== "number") {
+        throw new Error(`json_path "min" must be a number`);
+      }
+      if (hasMax && typeof raw.max !== "number") {
+        throw new Error(`json_path "max" must be a number`);
+      }
+      const out: {
+        type: "json_path";
+        path: string;
+        equals?: unknown;
+        oneOf?: unknown[];
+        min?: number;
+        max?: number;
+      } = { type: "json_path", path: raw.path };
+      if (hasEquals) out.equals = raw.equals;
+      if (hasOneOf) out.oneOf = raw.oneOf as unknown[];
+      if (hasMin) out.min = raw.min as number;
+      if (hasMax) out.max = raw.max as number;
+      return out;
+    }
     default:
       throw new Error(`Unknown assertion type: "${raw.type}"`);
   }

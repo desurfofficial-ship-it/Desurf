@@ -78,9 +78,15 @@ function countSummary(results: RecordCaseResult[]) {
   return s;
 }
 
-function runAssertions(testCase: TestCase, text: string): boolean | null {
+function runAssertions(
+  testCase: TestCase,
+  text: string,
+  baselineReference?: string | null
+): boolean | null {
   try {
-    const results = evaluateAssertions(testCase.assertions, { text });
+    const results = evaluateAssertions(testCase.assertions, { text }, {
+      baselineReference,
+    });
     return results.every((r) => r.passed);
   } catch {
     return null;
@@ -167,7 +173,12 @@ async function recordOne(
     const outputSha256 = sha256Normalized(newText);
     const inputSha256 = sha256Normalized(inputText);
     const promptSha256 = sha256Normalized(promptText);
-    const assertionsPassed = runAssertions(testCase, newText);
+    // F1 E18: max_diff_lines on record uses committed baseline as reference.
+    let baselineRef: string | null = null;
+    if (hasBaseline) {
+      try { baselineRef = await readFile(testCase.outputPath, "utf8"); } catch { baselineRef = null; }
+    }
+    const assertionsPassed = runAssertions(testCase, newText, baselineRef);
 
     if (opts.force) {
       let backupRel: string | null = null;

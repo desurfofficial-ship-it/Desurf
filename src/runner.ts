@@ -6,7 +6,8 @@
 
 import { readFile } from "node:fs/promises";
 import { evaluateTestCase } from "./engine.js";
-import { evaluateAssertions } from "./assertions.js";
+import { evaluateAssertions, type AssertionEvalContext } from "./assertions.js";
+import { latestBaselineBackup } from "./history.js";
 import { loadSuite } from "./offline.js";
 import {
   assertCassetteFresh,
@@ -51,9 +52,30 @@ function preview(text: string): string {
   return t.slice(0, PREVIEW_MAX) + "…";
 }
 
-async function runSingleTurn(
+
+async function resolveDiffContext(
+  suiteRoot: string,
   testCase: TestCase,
   provider: ModelAdapter
+): Promise<AssertionEvalContext> {
+  const isOffline = provider instanceof SavedOutputAdapter;
+  if (isOffline) {
+    const backup = await latestBaselineBackup(suiteRoot, testCase.id);
+    return { baselineReference: backup ? backup.output : null };
+  }
+  // Live / record: reference = committed baseline on disk
+  try {
+    const baseline = await readFile(testCase.outputPath, "utf8");
+    return { baselineReference: baseline };
+  } catch {
+    return { baselineReference: null };
+  }
+}
+
+async function runSingleTurn(
+  testCase: TestCase,
+  provider: ModelAdapter,
+  suiteRoot: string
 ): Promise<TestResult> {
   if (!testCase.input) {
     throw new Error(`Case "${testCase.id}" missing input path`);
@@ -123,7 +145,8 @@ async function runSingleTurn(
     await verifyCassetteOutput(testCase.outputPath, output.text);
   }
 
-  const result = evaluateTestCase(testCase, output);
+  const ctx = await resolveDiffContext(suiteRoot, testCase, provider);
+  const result = evaluateTestCase(testCase, output, ctx);
 
   if (driftWarning) {
     result.warnings = [driftWarning];
@@ -139,7 +162,8 @@ async function runSingleTurn(
 
 async function runMultiTurn(
   testCase: TestCase,
-  provider: ModelAdapter
+  provider: ModelAdapter,
+  suiteRoot: string
 ): Promise<TestResult> {
   const turns = testCase.turns!;
   const promptText = await readFile(testCase.prompt, "utf8");
@@ -240,7 +264,8 @@ async function runMultiTurn(
     }
 
     const turnAssertions = turn.assertions ?? [];
-    const turnAresults = evaluateAssertions(turnAssertions, { text: outputText });
+    const turnCtx = await resolveDiffContext(suiteRoot, testCase, provider);
+    const turnAresults = evaluateAssertions(turnAssertions, { text: outputText }, turnCtx);
     for (const ar of turnAresults) {
       ar.turnIndex = i;
     }
@@ -271,9 +296,10 @@ async function runMultiTurn(
 
   const lastOutput =
     history.filter((h) => h.role === "assistant").pop()?.content ?? "";
+  const caseCtx = await resolveDiffContext(suiteRoot, testCase, provider);
   const caseAresults = evaluateAssertions(testCase.assertions, {
     text: lastOutput,
-  });
+  }, caseCtx);
   allAssertionResults.push(...caseAresults);
 
   const allTurnsPassed = turnResults.every((t) => t.passed);
@@ -297,13 +323,14 @@ async function runMultiTurn(
 
 async function runOneExecution(
   testCase: TestCase,
-  provider: ModelAdapter
+  provider: ModelAdapter,
+  suiteRoot: string
 ): Promise<TestResult> {
   try {
     if (testCase.turns && testCase.turns.length > 0) {
-      return await runMultiTurn(testCase, provider);
+      return await runMultiTurn(testCase, provider, suiteRoot);
     }
-    return await runSingleTurn(testCase, provider);
+    return await runSingleTurn(testCase, provider, suiteRoot);
   } catch (err) {
     return {
       caseId: testCase.id,
@@ -334,7 +361,7 @@ export async function runSuite(options: RunOptions): Promise<RunSummary> {
   for (const c of cases) {
     const executions: TestResult[] = [];
     for (let i = 0; i < repeat; i++) {
-      executions.push(await runOneExecution(c, provider));
+      executions.push(await runOneExecution(c, provider, suite.rootDir));
     }
     const reliability = summarizeCase(c.id, executions);
     const cassetteState = await readCassetteState(c.outputPath);

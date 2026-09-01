@@ -9,6 +9,7 @@ import {
   RegexTimeoutError,
   regexTimeoutMs,
 } from "./regex-sandbox.js";
+import { unifiedDiff } from "./diff.js";
 
 // Module-level singleton: one persistent evaluation worker for the whole
 // run (lazily spawned, reused across cases/repeats, terminated only when a
@@ -393,9 +394,245 @@ function evaluateJsonSchema(
   };
 }
 
+
+/** Optional context for assertions that need a baseline reference (F1). */
+export type AssertionEvalContext = {
+  /**
+   * Reference text for `max_diff_lines`.
+   * - Live/record: committed baseline on disk.
+   * - Offline: retained baseline-backup from history, or null → trivial pass.
+   * - undefined: treated as trivial pass (no reference available).
+   */
+  baselineReference?: string | null;
+};
+
+/** Count +/- lines in a unified diff (exclude +++ / --- headers and truncation). */
+export function countChangedLines(diffText: string): number {
+  let n = 0;
+  for (const line of diffText.split("\n")) {
+    if (line.startsWith("+++") || line.startsWith("---")) continue;
+    if (line.includes("truncated") || line.startsWith("@@")) continue;
+    if (line.startsWith("+") || line.startsWith("-")) n++;
+  }
+  return n;
+}
+
+function evaluateMaxDiffLines(
+  output: ModelOutput,
+  budget: number,
+  ctx?: AssertionEvalContext
+): AssertionResult {
+  const assertion: Assertion = { type: "max_diff_lines", value: budget };
+  const ref = ctx?.baselineReference;
+  if (ref === undefined || ref === null) {
+    // Offline, never re-baselined → trivial pass (initial baseline is human-approved).
+    return {
+      assertion,
+      passed: true,
+      message: `diff budget ${budget}: no retained baseline (trivial pass)`,
+    };
+  }
+  // Import-free: unifiedDiff is imported at module top after we add it.
+  const diff = unifiedDiff(ref, output.text, 2000);
+  // If the helper truncates beyond 2000, treat as over budget by definition
+  // when the textual length of changed content is huge — unifiedDiff with
+  // maxLines 2000 still returns a truncated body; count what we have, and if
+  // the result contains a truncation marker assume exceeded.
+  const truncated = /truncated|lines omitted|maxLines/i.test(diff);
+  const changed = countChangedLines(diff);
+  if (truncated && changed >= budget) {
+    return {
+      assertion,
+      passed: false,
+      message:
+        `diff budget exceeded: ≥${changed} changed lines > ${budget} ` +
+        `(diff truncated at 2000 lines). Inspect with desurf diff --suite <path> --case <id> --full`,
+    };
+  }
+  const passed = changed <= budget;
+  return {
+    assertion,
+    passed,
+    message: passed
+      ? `diff budget ${budget}: ${changed} changed lines (within budget)`
+      : `diff budget exceeded: ${changed} changed lines > ${budget}. Inspect with desurf diff --suite <path> --case <id> --full`,
+  };
+}
+
+/**
+ * Resolve a restricted JSON path: dot keys + numeric [index].
+ * Leading `$.` is stripped. Returns { ok, value } or { ok:false, error }.
+ */
+export function resolveJsonPath(
+  root: unknown,
+  rawPath: string
+): { ok: true; value: unknown } | { ok: false; error: string } {
+  let path = rawPath.trim();
+  if (path.startsWith("$.")) path = path.slice(2);
+  else if (path === "$") return { ok: true, value: root };
+  if (path.length === 0) return { ok: false, error: `empty json_path` };
+
+  // Validate path syntax before walking.
+  // Tokens: identifier or [digits]
+  // Simpler tokenizer:
+  let i = 0;
+  let cur: unknown = root;
+  while (i < path.length) {
+    if (path[i] === ".") {
+      i++;
+      if (i >= path.length || path[i] === "." || path[i] === "[") {
+        return { ok: false, error: `malformed json_path: "${rawPath}"` };
+      }
+      continue;
+    }
+    if (path[i] === "[") {
+      const close = path.indexOf("]", i);
+      if (close < 0) return { ok: false, error: `malformed json_path: "${rawPath}"` };
+      const idxStr = path.slice(i + 1, close);
+      if (!/^\d+$/.test(idxStr)) {
+        return { ok: false, error: `malformed json_path: "${rawPath}"` };
+      }
+      const idx = Number(idxStr);
+      if (!Array.isArray(cur)) {
+        return { ok: false, error: `path "${rawPath}" resolved to nothing` };
+      }
+      if (idx < 0 || idx >= cur.length) {
+        return { ok: false, error: `path "${rawPath}" resolved to nothing` };
+      }
+      cur = cur[idx];
+      i = close + 1;
+      continue;
+    }
+    // key
+    let j = i;
+    while (j < path.length && path[j] !== "." && path[j] !== "[") j++;
+    const key = path.slice(i, j);
+    if (!key || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) {
+      return { ok: false, error: `malformed json_path: "${rawPath}"` };
+    }
+    if (cur === null || typeof cur !== "object" || Array.isArray(cur) || !(key in (cur as object))) {
+      return { ok: false, error: `path "${rawPath}" resolved to nothing` };
+    }
+    cur = (cur as Record<string, unknown>)[key];
+    i = j;
+  }
+  return { ok: true, value: cur };
+}
+
+function deepEqual(a: unknown, b: unknown): boolean {
+  if (Object.is(a, b)) return true;
+  if (typeof a !== typeof b) return false;
+  if (a === null || b === null) return a === b;
+  if (Array.isArray(a) && Array.isArray(b)) {
+    if (a.length !== b.length) return false;
+    return a.every((v, i) => deepEqual(v, b[i]));
+  }
+  if (typeof a === "object" && typeof b === "object") {
+    const ak = Object.keys(a as object).sort();
+    const bk = Object.keys(b as object).sort();
+    if (ak.length !== bk.length) return false;
+    if (!ak.every((k, i) => k === bk[i])) return false;
+    return ak.every((k) =>
+      deepEqual(
+        (a as Record<string, unknown>)[k],
+        (b as Record<string, unknown>)[k]
+      )
+    );
+  }
+  return false;
+}
+
+function truncate(v: unknown, n = 80): string {
+  const s = JSON.stringify(v);
+  if (s === undefined) return String(v);
+  return s.length > n ? s.slice(0, n) + "…" : s;
+}
+
+function evaluateJsonPath(
+  output: ModelOutput,
+  assertion: Extract<Assertion, { type: "json_path" }>
+): AssertionResult {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(output.text.replace(/^\uFEFF/, ""));
+  } catch (err) {
+    return {
+      assertion,
+      passed: false,
+      message: `json_path: output is not valid JSON (${err instanceof Error ? err.message : String(err)})`,
+    };
+  }
+  const resolved = resolveJsonPath(parsed, assertion.path);
+  if (!resolved.ok) {
+    // Path miss is assertion failure (exit 1); only load-time syntax is exit 2.
+    // Distinguish: if error starts with malformed, shouldn't reach here (loader).
+    return {
+      assertion,
+      passed: false,
+      message: `json_path: ${resolved.error}`,
+    };
+  }
+  const val = resolved.value;
+
+  if ("equals" in assertion && assertion.equals !== undefined) {
+    const passed = deepEqual(val, assertion.equals);
+    return {
+      assertion,
+      passed,
+      message: passed
+        ? `json_path ${assertion.path}: equals matched`
+        : `json_path ${assertion.path}: expected ${truncate(assertion.equals)}, got ${truncate(val)}`,
+    };
+  }
+  if (assertion.oneOf !== undefined) {
+    const passed = assertion.oneOf.some((cand) => deepEqual(val, cand));
+    return {
+      assertion,
+      passed,
+      message: passed
+        ? `json_path ${assertion.path}: oneOf matched`
+        : `json_path ${assertion.path}: value ${truncate(val)} not in oneOf ${truncate(assertion.oneOf)}`,
+    };
+  }
+  if (assertion.min !== undefined || assertion.max !== undefined) {
+    if (typeof val !== "number" || Number.isNaN(val)) {
+      return {
+        assertion,
+        passed: false,
+        message: `json_path ${assertion.path}: expected a number for min/max, got ${truncate(val)}`,
+      };
+    }
+    if (assertion.min !== undefined && val < assertion.min) {
+      return {
+        assertion,
+        passed: false,
+        message: `json_path ${assertion.path}: ${val} < min ${assertion.min}`,
+      };
+    }
+    if (assertion.max !== undefined && val > assertion.max) {
+      return {
+        assertion,
+        passed: false,
+        message: `json_path ${assertion.path}: ${val} > max ${assertion.max}`,
+      };
+    }
+    return {
+      assertion,
+      passed: true,
+      message: `json_path ${assertion.path}: ${val} within bounds`,
+    };
+  }
+  return {
+    assertion,
+    passed: false,
+    message: `json_path ${assertion.path}: no comparison field`,
+  };
+}
+
 export function evaluateAssertion(
   assertion: Assertion,
-  output: ModelOutput
+  output: ModelOutput,
+  ctx?: AssertionEvalContext
 ): AssertionResult {
   switch (assertion.type) {
     case "required":
@@ -414,6 +651,10 @@ export function evaluateAssertion(
       return evaluateRegex(output, assertion.pattern, assertion.flags);
     case "json_schema":
       return evaluateJsonSchema(output, assertion.schema);
+    case "max_diff_lines":
+      return evaluateMaxDiffLines(output, assertion.value, ctx);
+    case "json_path":
+      return evaluateJsonPath(output, assertion);
     default: {
       const _exhaustive: never = assertion;
       return {
@@ -427,7 +668,8 @@ export function evaluateAssertion(
 
 export function evaluateAssertions(
   assertions: Assertion[],
-  output: ModelOutput
+  output: ModelOutput,
+  ctx?: AssertionEvalContext
 ): AssertionResult[] {
-  return assertions.map((a) => evaluateAssertion(a, output));
+  return assertions.map((a) => evaluateAssertion(a, output, ctx));
 }

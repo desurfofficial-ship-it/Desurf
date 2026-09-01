@@ -97,3 +97,27 @@ Mutually exclusive with `input`. Output must end in `.json` (transcript cassette
 
 
 See `docs/cli-contract.md` for `diff` / `--json` behavior on turns cases.
+
+
+### `max_diff_lines` (v0.8.0)
+
+`{ "type": "max_diff_lines", "value": <N> }` — `N` integer ≥ 0. Fails when unified-diff changed lines (`+`/`-`, normalized) exceed the budget.
+
+- **Live / record**: reference = committed baseline file; compared = fresh model output.
+- **Offline**: reference = most recent `baseline-backup` in `.desurf-history`; compared = committed output. **No history → trivial pass** (initial baseline is human-approved).
+- `value: 0` means exact match. Message includes actual vs budget and points at `desurf diff --full`.
+
+### `json_path` (v0.8.0)
+
+`{ "type": "json_path", "path": "a.b[0].c", ...one comparison... }`
+
+Path: dot keys + numeric `[index]`; optional leading `$.`. Malformed path → load exit **2**.
+
+Exactly one comparison group:
+- `equals` — strict deep equality (no coercion: `1` ≠ `"1"`)
+- `oneOf` — non-empty array, deep equality against any element
+- `min` / `max` — inclusive numeric bounds (alone or together)
+
+JSON parse failure or path miss → assertion failure (exit **1**), not config error.
+
+Unknown fields on any assertion object still fail load (exit **2**).

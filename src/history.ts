@@ -488,6 +488,30 @@ export async function pickEntry(
 
 export type AcceptResult = { caseId: string; snapshot: string; backup: string | null };
 
+
+/**
+ * Most recent baseline-backup snapshot for a case (F1 max_diff_lines offline ref).
+ * Returns null when the case has never been re-baselined.
+ */
+export async function latestBaselineBackup(
+  suiteRoot: string,
+  caseId: string
+): Promise<{ output: string; file: string } | null> {
+  try {
+    const { index } = await readIndex(suiteRoot, caseId);
+    const backups = [...index.entries]
+      .reverse()
+      .filter((e) => e.kind === "baseline-backup");
+    if (backups.length === 0) return null;
+    const entry = backups[0]!;
+    const absPath = join(historyDirFor(suiteRoot, caseId), entry.file);
+    const snap = await readSnapshotFile(absPath);
+    return { output: snap.output, file: entry.file };
+  } catch {
+    return null;
+  }
+}
+
 export async function acceptSnapshot(
   suiteRoot: string,
   caseId: string,
