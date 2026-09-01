@@ -28,3 +28,42 @@ None material. Per-turn unified diff labeling (`== turn N ==`) is available via 
 ## Proof
 
 `npm run typecheck && npm run build && npm test` green; `npm ls --prod` empty.
+
+---
+
+## B3 Completion addendum (audit gaps closed)
+
+### Fixes applied
+
+1. **`--json` D9 surface** (`src/cli.ts` `summaryToJson`):
+   - Each execution includes `turns: [{ index, passed, assertionResults, outputPreview?, error? }]` for multi-turn cases (omitted for single-turn).
+   - Each `assertionFailures[]` entry includes `turnIndex` when set.
+2. **Transcript integrity (E8)**: multi-turn offline path calls `verifyCassetteOutput` on the full transcript before replay.
+3. **`diff` per-turn labels (T13)**: transcript vs transcript renders `== turn N ==` hunks; `--full` uses maxLines 2000.
+4. **Docs**: `cli-contract.md` documents JSON turns fields and `diff` exit **1** when no pending snapshot.
+
+### New tests (`test/turns-completion.test.ts`)
+
+| ID | Coverage |
+|----|----------|
+| T15 | `--json` turns[1].passed=false + turnIndex:1 |
+| T10 | seal turnUserSha256[]; edit turn-2 → exit 2, first stale turn index: 1 |
+| T11 | recorded soft drift exit 0 + drift.staleTurnIndex in --json |
+| T12 | record→drift→accept→test→revert→history on turns case |
+| T13 | diff `== turn N ==` labels |
+| T14 | --repeat 3 FLAKY/REGRESSION on varying turn output |
+| E7 | transcript turn-count mismatch → exit 2 |
+| E8 | tampered sealed transcript → exit 2 |
+| E11 | provider error turn 2 of 3 → stops, turns[1].error |
+
+### Proof
+
+```
+npm run typecheck  ✅
+npm run build      ✅
+npm test           ✅ 373 passed (35 files)
+version            0.7.0 (unchanged)
+npm ls --prod      empty
+```
+
+Explicit confirmation: **`--json` now exposes `turns` and `turnIndex`.**

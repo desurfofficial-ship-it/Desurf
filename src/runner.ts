@@ -196,6 +196,8 @@ async function runMultiTurn(
             `case has ${turns.length} turns, transcript has ${Array.isArray(parsed.turns) ? parsed.turns.length : "none"}`
         );
       }
+      // E8: authenticate sealed transcript bytes (outputSha256) before replay.
+      await verifyCassetteOutput(testCase.outputPath, raw);
     } catch (err) {
       if (err instanceof SyntaxError) {
         throw new Error(

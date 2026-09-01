@@ -235,3 +235,15 @@ A case may define `turns` (1–20) instead of `input`. Each turn is `{ "user": "
 - Per-turn assertions evaluate that turn's output; case-level assertions evaluate the **last** turn only.
 - Assertion failure mid-conversation continues remaining turns; provider error stops the conversation.
 - History/diff/accept/revert operate on the transcript as an atomic unit.
+
+
+### `--json` multi-turn fields (v0.7.0)
+
+For a turns case, each `executions[]` entry includes:
+
+- `turns`: `[{ index, passed, assertionResults, outputPreview?, error? }]` — omitted for single-turn cases.
+- `assertionFailures[].turnIndex` — present when the failure was evaluated on a specific turn.
+
+### `desurf diff` with no pending snapshot
+
+When there is no record snapshot for the case, `desurf diff` exits **1** with a not-found message (same family as accept/revert “nothing to accept”).

@@ -691,6 +691,8 @@ function summaryToJson(summary: RunSummary): object {
           .map((a) => ({
             type: a.assertion.type,
             message: a.message,
+            // B3 D9: name the failing turn when present (omit for single-turn).
+            ...(a.turnIndex !== undefined ? { turnIndex: a.turnIndex } : {}),
           })),
         outputPreview: e.outputPreview ?? null,
         // v0.4.3: per-execution warnings (soft drift) and the regression
@@ -700,6 +702,23 @@ function summaryToJson(summary: RunSummary): object {
         warnings: e.warnings ?? [],
         drift: e.drift ?? null,
         diff: e.diff ?? null,
+        // B3 D9: per-turn results for multi-turn cases; omitted for single-turn.
+        ...(e.turns
+          ? {
+              turns: e.turns.map((tr) => ({
+                index: tr.index,
+                passed: tr.passed,
+                assertionResults: tr.assertionResults.map((a) => ({
+                  type: a.assertion.type,
+                  message: a.message,
+                  passed: a.passed,
+                  ...(a.turnIndex !== undefined ? { turnIndex: a.turnIndex } : {}),
+                })),
+                outputPreview: tr.outputPreview ?? null,
+                error: tr.error ?? null,
+              })),
+            }
+          : {}),
       })),
     })),
   };
@@ -1301,7 +1320,30 @@ async function cmdDiff(parsed: ParsedArgs): Promise<number> {
       console.log("\n(no baseline on disk — showing snapshot output only)\n");
       console.log(snapshot.output);
     } else {
-      const d = unifiedDiff(baselineText, snapshot.output, parsed.full ? 2000 : 200);
+      // B3: when both sides are transcript JSON, render per-turn hunks (T13).
+      const maxLines = parsed.full ? 2000 : 200;
+      let d = "";
+      try {
+        const baseTr = JSON.parse(baselineText) as { turns?: Array<{ user?: string; output?: string }> };
+        const snapTr = JSON.parse(snapshot.output) as { turns?: Array<{ user?: string; output?: string }> };
+        if (Array.isArray(baseTr.turns) && Array.isArray(snapTr.turns)) {
+          const n = Math.max(baseTr.turns.length, snapTr.turns.length);
+          const parts: string[] = [];
+          for (let i = 0; i < n; i++) {
+            const bo = baseTr.turns[i]?.output ?? "";
+            const so = snapTr.turns[i]?.output ?? "";
+            const hunk = unifiedDiff(bo, so, maxLines);
+            parts.push(`== turn ${i} ==`);
+            parts.push(hunk || "(no change)");
+          }
+          d = parts.join("\n");
+        }
+      } catch {
+        // not transcript JSON — fall through to whole-file diff
+      }
+      if (!d) {
+        d = unifiedDiff(baselineText, snapshot.output, maxLines);
+      }
       console.log("\n" + (d || "(no textual diff — outputs equal after normalization)"));
     }
     return 0;

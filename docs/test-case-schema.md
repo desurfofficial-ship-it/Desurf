@@ -95,3 +95,5 @@ Unknown assertion fields are **rejected** at load time (configuration error → 
 Optional array of 1–20 objects: `{ "user": "<relative path>", "assertions"?: Assertion[] }`.
 Mutually exclusive with `input`. Output must end in `.json` (transcript cassette).
 
+
+See `docs/cli-contract.md` for `diff` / `--json` behavior on turns cases.
