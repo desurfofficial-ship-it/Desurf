@@ -89,3 +89,9 @@ Unknown assertion fields are **rejected** at load time (configuration error → 
 - Prefer explicit behavioral properties over exact full-string matching.
 - Keep the assertion set small until real use cases justify more kinds.
 - Do not weaken offline contract fixtures to accommodate live-model variability.
+
+## turns (v0.7.0)
+
+Optional array of 1–20 objects: `{ "user": "<relative path>", "assertions"?: Assertion[] }`.
+Mutually exclusive with `input`. Output must end in `.json` (transcript cassette).
+

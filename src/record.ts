@@ -124,15 +124,46 @@ async function recordOne(
       throw new Error(`Provider "${providerName}" is not executable — cannot record new outputs.`);
     }
 
-    const output: ModelOutput = await provider.execute({
-      input: inputText, prompt: promptText, outputPath: testCase.outputPath, model,
-    });
+    let newText: string;
+    let output: ModelOutput;
+    let turnUserTexts: string[] | undefined;
 
-    if (output.text === "") {
-      return { caseId, status: "error", verdict: "error", message: "provider returned an empty response" };
+    if (testCase.turns && testCase.turns.length > 0) {
+      // Multi-turn record: sequential conversation, atomic transcript (D7).
+      type Hist = { role: "user" | "assistant"; content: string };
+      const history: Hist[] = [];
+      const transcriptTurns: Array<{ user: string; output: string }> = [];
+      turnUserTexts = [];
+      for (let i = 0; i < testCase.turns.length; i++) {
+        const turn = testCase.turns[i]!;
+        const userText = await readFile(turn.user, "utf8");
+        turnUserTexts.push(userText);
+        const turnOut = await provider.execute({
+          input: userText,
+          prompt: promptText,
+          outputPath: testCase.outputPath,
+          model,
+          history: history.length > 0 ? [...history] : undefined,
+          turnIndex: i,
+        });
+        if (turnOut.text === "") {
+          return { caseId, status: "error", verdict: "error", message: `provider returned empty response on turn ${i}` };
+        }
+        transcriptTurns.push({ user: userText, output: turnOut.text });
+        history.push({ role: "user", content: userText });
+        history.push({ role: "assistant", content: turnOut.text });
+        output = turnOut;
+      }
+      newText = JSON.stringify({ version: 1, turns: transcriptTurns }, null, 2) + "\n";
+    } else {
+      output = await provider.execute({
+        input: inputText, prompt: promptText, outputPath: testCase.outputPath, model,
+      });
+      if (output.text === "") {
+        return { caseId, status: "error", verdict: "error", message: "provider returned an empty response" };
+      }
+      newText = output.text;
     }
-
-    const newText = output.text;
     const outputSha256 = sha256Normalized(newText);
     const inputSha256 = sha256Normalized(inputText);
     const promptSha256 = sha256Normalized(promptText);
@@ -155,7 +186,7 @@ async function recordOne(
       }
       await atomicWriteFile(testCase.outputPath, newText, "utf8");
       await writeCassetteMeta(testCase.outputPath, inputText, promptText, "record", newText,
-        output.provider ?? providerName, output.model ?? model);
+        output!.provider ?? providerName, output!.model ?? model, "soft", turnUserTexts);
       return {
         caseId, status: "recorded", verdict: hasBaseline ? "drift" : "new",
         message: hasBaseline
@@ -168,7 +199,7 @@ async function recordOne(
     if (!hasBaseline) {
       await atomicWriteFile(testCase.outputPath, newText, "utf8");
       await writeCassetteMeta(testCase.outputPath, inputText, promptText, "record", newText,
-        output.provider ?? providerName, output.model ?? model);
+        output!.provider ?? providerName, output!.model ?? model, "soft", turnUserTexts);
       const snap = await writeRecordSnapshot({
         suiteRoot: suite.rootDir, caseId, output: newText, provider: providerName,
         model: model ?? null, inputSha256, promptSha256, baselineSha256AtCapture: null,

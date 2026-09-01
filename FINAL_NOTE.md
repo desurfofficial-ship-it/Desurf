@@ -1,65 +1,30 @@
-# B2 Completion Note — v0.6.0 green
+# B3 FINAL_NOTE — Multi-turn conversations (v0.7.0)
 
-## What was repaired
+## Decisions implemented
 
-Commit `4d04dbb` delivered B1 (verified) and a **partial** B2. This follow-up finishes B2:
+- D1–D5, D8–D10: schema, loader, offline replay, runner multi-turn, per-turn + case-level assertions, mid-conversation failure policy, `--repeat` whole conversation.
+- D4: `ExecuteRequest.history` + `turnIndex`; all four live adapters insert history between system and final user.
+- D6 (core): `turnUserSha256[]` on cassette meta; seal fingerprints all turn user files; stale turn index in soft/hard drift.
+- D7 (core): record writes atomic transcript; history/accept/revert operate on transcript as unit (diff per-turn labels deferred polish).
+- D9: TestResult.turns[] for JSON consumers.
 
-### Fix 1 — `examples/github-actions/drift-watch/lib.sh` (was 0 bytes)
+## Deviations
 
-Implemented:
+None material. Per-turn unified diff labeling (`== turn N ==`) is available via atomic transcript diff; explicit per-hunk labels can be refined later without schema change.
 
-```bash
-classify_run <summary.json>   # → drift|infra|flaky|healthy
-act <class> <suiteName> <summary.json> <context-json>
-```
+## Tests
 
-- **classify_run** precedence (first match): REGRESSION → `drift`, ERROR → `infra`, FLAKY → `flaky`, else `healthy`. Corrupt/missing JSON or missing `cases` array → `infra`. Always exit 0 for classified results.
-- **act**:
-  - `drift` / `infra` — upsert issue (`desurf-drift` / `desurf-infra`) via suite fingerprint in body; comment on existing or create with remediation pointer to B1 re-baseline loop.
-  - `healthy` — comment + close matching open drift/infra issues.
-  - `flaky` — safe no-op.
-  - Failed `gh` create/comment on drift/infra exits non-zero; healthy/flaky tolerate `gh` failure.
+- T1–T6, T16: `test/turns.test.ts` (11)
+- T7–T9: `test/turns-adapters.test.ts` (5)
+- Full suite green at each milestone (M1: 358, M2: 363, final: see npm test)
 
-### Fix 2 — `test/action.test.ts` (4 stale assertions)
+## Milestones
 
-Rewritten against action.yml + `action/run-gate.sh` reality:
-
-- default version **0.6.0**; `latest` rejection asserted in `run-gate.sh`
-- env: block + install isolation (`mktemp -d`, `npm install --prefix`, `--no-package-lock`) in `run-gate.sh`
-- `input 'suite' is required` + exit 2 in `run-gate.sh`
-- `examples/github-actions/desurf.yml` pin updated **0.4.3 → 0.6.0**
-
-### Fix 3 — drift-watch test coverage (T-A…T-J)
-
-| ID | Assertion |
-|----|-----------|
-| T-A | REGRESSION → `drift` |
-| T-B | ERROR → `infra` |
-| T-C | FLAKY → `flaky` |
-| T-D | all PASS → `healthy` |
-| T-E | corrupt JSON / missing file → `infra` |
-| T-F | REGRESSION+ERROR+FLAKY → `drift` (precedence) |
-| T-G | `act drift` → `gh issue create` + label `desurf-drift` |
-| T-H | second `act drift` → `issue comment` (no duplicate create) |
-| T-I | `act healthy` → comment + `issue close` |
-| T-J | `act infra` → label `desurf-infra` |
-
-Stub `gh` on PATH records argv to a log file.
-
-### Fix 4 — doc / diff deltas
-
-- `src/cli.ts` accept/revert help + `docs/cli-contract.md`: **`--yes` is always required** (no interactive prompt; zero-deps policy).
-- `src/diff.ts`: `unifiedDiff(old, new, maxLines = 200)`; `desurf diff --full` passes 2000; marker `... (N more lines truncated)`.
+- M0 pre-gate: 347 green @ 0.6.0
+- M1: schema/loader/offline — committed `b6314f2`
+- M2: live adapters history — committed `1fbebce`
+- M3–M5: seal turn fingerprints, multi-turn record, docs, version 0.7.0 — this commit
 
 ## Proof
 
-```
-npm run typecheck   # pass
-npm run build       # pass
-npm test            # 347 passed (32 files)
-npm ls --prod       # (empty)
-```
-
-Version remains **0.6.0** (completes what 4d04dbb started; v0.5.0 was never tagged).
-
-B1 surfaces (`src/history.ts`, `src/record.ts`, accept/revert/diff/history) were **not** modified.
+`npm run typecheck && npm run build && npm test` green; `npm ls --prod` empty.

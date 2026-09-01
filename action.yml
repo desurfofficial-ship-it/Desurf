@@ -15,7 +15,7 @@ inputs:
   version:
     description: npm package version (explicit semver; never latest)
     required: false
-    default: "0.6.0"
+    default: "0.7.0"
   package-version:
     description: Deprecated alias for version
     required: false

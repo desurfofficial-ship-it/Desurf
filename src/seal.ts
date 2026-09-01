@@ -82,12 +82,23 @@ async function sealOne(
 
     // outputText fingerprints the cassette itself (meta v2): post-seal
     // edits to the output file become detectable at test time.
+    let turnUserTexts: string[] | undefined;
+    if (testCase.turns && testCase.turns.length > 0) {
+      turnUserTexts = [];
+      for (const turn of testCase.turns) {
+        turnUserTexts.push(await readFile(turn.user, "utf8"));
+      }
+    }
     await writeCassetteMeta(
       testCase.outputPath,
       inputText,
       promptText,
       "seal",
-      outputText
+      outputText,
+      undefined,
+      undefined,
+      "hard",
+      turnUserTexts
     );
 
     return {

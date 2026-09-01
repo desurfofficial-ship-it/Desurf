@@ -225,3 +225,13 @@ Scheduled live runs are **monitoring**, not merge gates. Exit-code semantics are
 | Success | **0** |
 | Nothing to accept/revert | **1** |
 | Integrity / missing `--yes` (always required; no interactive prompt) | **2** |
+
+## Multi-turn conversations (`turns`) — v0.7.0
+
+A case may define `turns` (1–20) instead of `input`. Each turn is `{ "user": "<path>", "assertions"?: [...] }`.
+- `prompt` remains required (system/base instruction for the whole conversation).
+- `input` and `turns` are mutually exclusive (both present → exit 2).
+- Output must be a `.json` transcript: `{ "version": 1, "turns": [{ "user", "output" }] }`.
+- Per-turn assertions evaluate that turn's output; case-level assertions evaluate the **last** turn only.
+- Assertion failure mid-conversation continues remaining turns; provider error stops the conversation.
+- History/diff/accept/revert operate on the transcript as an atomic unit.

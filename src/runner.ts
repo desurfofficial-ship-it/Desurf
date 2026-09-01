@@ -143,7 +143,11 @@ async function runMultiTurn(
 ): Promise<TestResult> {
   const turns = testCase.turns!;
   const promptText = await readFile(testCase.prompt, "utf8");
-  const firstUserText = await readFile(turns[0]!.user, "utf8");
+  const turnUserTexts: string[] = [];
+  for (const turn of turns) {
+    turnUserTexts.push(await readFile(turn.user, "utf8"));
+  }
+  const firstUserText = turnUserTexts[0]!;
   let driftWarning: string | undefined;
   let driftMeta: TestResult["drift"];
 
@@ -151,12 +155,18 @@ async function runMultiTurn(
     const freshness = await checkCassetteFresh(
       testCase.outputPath,
       firstUserText,
-      promptText
+      promptText,
+      turnUserTexts
     );
     if (!freshness.fresh && freshness.severity === "soft") {
+      const turnHint =
+        freshness.staleTurnIndex !== undefined
+          ? ` Turn ${freshness.staleTurnIndex} user file is stale.`
+          : "";
       driftWarning =
-        "Prompt or turn user file changed since output was recorded. " +
-        "Evaluating against a drifted recorded baseline. " +
+        "Prompt or turn user file changed since output was recorded." +
+        turnHint +
+        " Evaluating against a drifted recorded baseline. " +
         "Re-capture with `desurf record --force` or re-seal with `desurf seal --force` to refresh.";
       driftMeta = {
         state: "soft",
@@ -164,9 +174,17 @@ async function runMultiTurn(
         inputStale: freshness.inputStale,
         cassetteState: "recorded",
         message: driftWarning,
+        staleTurnIndex: freshness.staleTurnIndex,
       };
     } else if (!freshness.fresh) {
-      await assertCassetteFresh(testCase.outputPath, firstUserText, promptText);
+      const turnHint =
+        freshness.staleTurnIndex !== undefined
+          ? ` (first stale turn index: ${freshness.staleTurnIndex})`
+          : "";
+      throw new Error(
+        `Sealed cassette is stale for case "${testCase.id}"${turnHint}. ` +
+          `Re-seal with \`desurf seal --force\` after updating fixtures.`
+      );
     }
 
     try {

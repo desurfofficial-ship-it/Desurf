@@ -213,3 +213,23 @@ MIT
 ## Drift-watch (v0.6.0)
 
 Scheduled live monitoring that opens GitHub issues on sustained REGRESSION. See [docs/drift-watch.md](docs/drift-watch.md) and `examples/github-actions/desurf-drift-watch.yml`.
+
+
+## Multi-turn conversations (v0.7.0)
+
+Test conversational flows with an ordered list of user turns. The model answers each turn with full prior context; the cassette is a JSON transcript.
+
+```json
+{
+  "id": "support-chat",
+  "prompt": "prompts/agent.txt",
+  "output": "outputs/chat.json",
+  "turns": [
+    { "user": "inputs/turn0.txt", "assertions": [{ "type": "required", "value": "hello" }] },
+    { "user": "inputs/turn1.txt" }
+  ],
+  "assertions": [{ "type": "required", "value": "resolved" }]
+}
+```
+
+See `docs/cli-contract.md` for full semantics.

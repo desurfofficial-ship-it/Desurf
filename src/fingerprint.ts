@@ -67,6 +67,11 @@ export type CassetteMeta = {
   provider?: string;
   /** Live model id when source is "record" */
   model?: string;
+  /**
+   * B3 multi-turn: sha256Normalized of each turn's user file, in order.
+   * Absent on single-turn / pre-B3 sidecars.
+   */
+  turnUserSha256?: string[];
 };
 
 export function sha256(text: string): string {
@@ -108,7 +113,8 @@ export function buildMeta(
   outputText?: string,
   provider?: string,
   model?: string,
-  drift: DriftSeverity = "hard"
+  drift: DriftSeverity = "hard",
+  turnUserTexts?: string[]
 ): CassetteMeta {
   if (outputText === undefined) {
     // Legacy v1 builder: frozen semantics, byte-exact hashes.
@@ -148,6 +154,9 @@ export function buildMeta(
   // refreshed; drift is a warning). Sealed/legacy cassettes take the
   // caller's severity (default "hard").
   meta.drift = source === "record" ? "soft" : drift;
+  if (turnUserTexts && turnUserTexts.length > 0) {
+    meta.turnUserSha256 = turnUserTexts.map((txt) => sha256Normalized(txt));
+  }
   return meta;
 }
 
@@ -170,7 +179,8 @@ export async function writeCassetteMeta(
   outputText?: string,
   provider?: string,
   model?: string,
-  drift: DriftSeverity = "hard"
+  drift: DriftSeverity = "hard",
+  turnUserTexts?: string[]
 ): Promise<void> {
   // Recorded cassettes are always soft (see buildMeta); sealed/legacy
   // cassettes take the caller's severity (default "hard").
@@ -182,7 +192,8 @@ export async function writeCassetteMeta(
     outputText,
     provider,
     model,
-    effective
+    effective,
+    turnUserTexts
   );
   await atomicWriteFile(
     metaPathFor(outputPath),
@@ -333,6 +344,8 @@ export async function readCassetteState(
 }
 
 export type CassetteFreshness = {
+  /** First stale turn index when turnUserSha256 mismatches (D6). */
+  staleTurnIndex?: number;
   fresh: boolean;
   promptStale: boolean;
   inputStale: boolean;
@@ -352,7 +365,8 @@ export type CassetteFreshness = {
 export async function checkCassetteFresh(
   outputPath: string,
   inputText: string,
-  promptText: string
+  promptText: string,
+  turnUserTexts?: string[]
 ): Promise<CassetteFreshness> {
   const meta = await readCassetteMeta(outputPath);
   if (!meta) {
@@ -366,12 +380,31 @@ export async function checkCassetteFresh(
   const promptStale = meta.promptSha256 !== promptHash;
   const inputStale = meta.inputSha256 !== inputHash;
 
-  return {
-    fresh: !promptStale && !inputStale,
+  let staleTurnIndex: number | undefined;
+  if (meta.turnUserSha256 && turnUserTexts) {
+    const n = Math.min(meta.turnUserSha256.length, turnUserTexts.length);
+    for (let i = 0; i < n; i++) {
+      if (meta.turnUserSha256[i] !== hash(turnUserTexts[i]!)) {
+        staleTurnIndex = i;
+        break;
+      }
+    }
+    if (staleTurnIndex === undefined && meta.turnUserSha256.length !== turnUserTexts.length) {
+      staleTurnIndex = Math.min(meta.turnUserSha256.length, turnUserTexts.length);
+    }
+  }
+
+  const fresh = !promptStale && !inputStale && staleTurnIndex === undefined;
+  const result: CassetteFreshness = {
+    fresh,
     promptStale,
     inputStale,
     severity: cassetteDrift(meta),
   };
+  if (staleTurnIndex !== undefined) {
+    result.staleTurnIndex = staleTurnIndex;
+  }
+  return result;
 }
 
 function driftParts(promptStale: boolean, inputStale: boolean): string[] {
