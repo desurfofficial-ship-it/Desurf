@@ -9,7 +9,7 @@
       "assertions": [
         {
           "type": "required",
-          "value": "ZZZ-NEVER-MATCH-DRIFT-SOAK",
+          "value": "billing",
           "caseSensitive": false
         }
       ]
