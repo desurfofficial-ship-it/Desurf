@@ -27,7 +27,7 @@ const ALLOWED_FIELDS: Record<string, Set<string>> = {
   required: new Set(["type", "value", "caseSensitive"]),
   forbidden: new Set(["type", "value", "caseSensitive"]),
   regex: new Set(["type", "pattern", "flags"]),
-  json_schema: new Set(["type", "schema"]),
+  json_schema: new Set(["type", "schema", "allowFences"]),
   max_diff_lines: new Set(["type", "value"]),
   json_path: new Set(["type", "path", "equals", "oneOf", "min", "max"]),
 };
@@ -303,7 +303,16 @@ export function parseAssertion(raw: RawAssertion): Assertion {
         throw new Error(`json_schema assertion needs an object "schema"`);
       }
       validateJsonSchemaShape(raw.schema);
-      return { type: "json_schema", schema: raw.schema };
+      if (raw.allowFences !== undefined && typeof raw.allowFences !== "boolean") {
+        throw new Error(
+          `json_schema: "allowFences" must be a boolean (got ${typeof raw.allowFences})`
+        );
+      }
+      return {
+        type: "json_schema",
+        schema: raw.schema,
+        ...(raw.allowFences !== undefined ? { allowFences: raw.allowFences as boolean } : {}),
+      };
     case "max_diff_lines": {
       if (typeof raw.value !== "number" || !Number.isInteger(raw.value) || raw.value < 0) {
         throw new Error(

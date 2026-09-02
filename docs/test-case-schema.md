@@ -99,6 +99,11 @@ Mutually exclusive with `input`. Output must end in `.json` (transcript cassette
 See `docs/cli-contract.md` for `diff` / `--json` behavior on turns cases.
 
 
+- **`allowFences`** (optional, default `false`): opt-in. When `true`, if the strict JSON parse fails, Desurf parses the **first** markdown fenced JSON block. If no fenced block parses, the original strict error (`Output is not valid JSON`) is preserved.
+
+```json
+{ "type": "json_schema", "schema": { "type": "object", "required": ["category"] }, "allowFences": true }
+```
 ### `max_diff_lines` (v0.8.0)
 
 `{ "type": "max_diff_lines", "value": <N> }` — `N` integer ≥ 0. Fails when unified-diff changed lines (`+`/`-`, normalized) exceed the budget.

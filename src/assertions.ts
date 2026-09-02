@@ -282,25 +282,92 @@ function checkNestedProperties(
  * - properties.<name>.type enforcement (string/number/integer/boolean/
  *   object/array/null), recursively for nested objects
  */
+
+/**
+ * Extract the first markdown-fenced block body (H2 allowFences).
+ * Opener: trimmed line starts with 3+ backticks; language tag ignored.
+ * Closer: next trimmed line that is only 3+ backticks.
+ * Unterminated opener → remaining lines after opener.
+ * Returns null when no opener is found.
+ */
+function extractFirstFencedBlock(text: string): string | null {
+  const normalized = text.replace(/^\uFEFF/, "").replace(/\r\n/g, "\n");
+  const lines = normalized.split("\n");
+  let openIdx = -1;
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = lines[i]!.trim();
+    if (trimmed.startsWith("```") && trimmed.length >= 3) {
+      // Opener: starts with three or more backticks
+      let ticks = 0;
+      while (ticks < trimmed.length && trimmed[ticks] === "`") ticks++;
+      if (ticks >= 3) {
+        openIdx = i;
+        break;
+      }
+    }
+  }
+  if (openIdx < 0) return null;
+  let closeIdx = -1;
+  for (let i = openIdx + 1; i < lines.length; i++) {
+    const trimmed = lines[i]!.trim();
+    if (/^`{3,}$/.test(trimmed)) {
+      closeIdx = i;
+      break;
+    }
+  }
+  const bodyLines =
+    closeIdx >= 0
+      ? lines.slice(openIdx + 1, closeIdx)
+      : lines.slice(openIdx + 1);
+  return bodyLines.join("\n");
+}
+
 function evaluateJsonSchema(
   output: ModelOutput,
-  schema: Record<string, unknown>
+  schema: Record<string, unknown>,
+  allowFences?: boolean
 ): AssertionResult {
+  const assertionBase: Assertion = {
+    type: "json_schema",
+    schema,
+    ...(allowFences !== undefined ? { allowFences } : {}),
+  };
   let parsed: unknown;
   try {
     parsed = JSON.parse(output.text.replace(/^\uFEFF/, ""));
   } catch {
-    return {
-      assertion: { type: "json_schema", schema },
-      passed: false,
-      message: "Output is not valid JSON",
-    };
+    if (allowFences === true) {
+      const block = extractFirstFencedBlock(output.text);
+      if (block !== null) {
+        try {
+          parsed = JSON.parse(block);
+        } catch {
+          return {
+            assertion: assertionBase,
+            passed: false,
+            message: "Output is not valid JSON",
+          };
+        }
+      } else {
+        return {
+          assertion: assertionBase,
+          passed: false,
+          message: "Output is not valid JSON",
+        };
+      }
+    } else {
+      return {
+        assertion: assertionBase,
+        passed: false,
+        message: "Output is not valid JSON",
+      };
+    }
   }
 
   if (schema.type === "object") {
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
       return {
-        assertion: { type: "json_schema", schema },
+        assertion: assertionBase,
         passed: false,
         message: "Expected a JSON object",
       };
@@ -315,7 +382,7 @@ function evaluateJsonSchema(
       // like "constructor"/"__proto__" falsely satisfied required-key checks.
       if (!Object.hasOwn(obj, key)) {
         return {
-          assertion: { type: "json_schema", schema },
+          assertion: assertionBase,
           passed: false,
           message: `Missing required key: "${key}"`,
         };
@@ -343,7 +410,7 @@ function evaluateJsonSchema(
       if ("const" in ps) {
         if (!Object.hasOwn(obj, propName) || obj[propName] !== ps.const) {
           return {
-            assertion: { type: "json_schema", schema },
+            assertion: assertionBase,
             passed: false,
             message: `Property "${propName}" expected const ${JSON.stringify(ps.const)}, got ${JSON.stringify(obj[propName])}`,
           };
@@ -353,14 +420,14 @@ function evaluateJsonSchema(
       if ("enum" in ps) {
         if (!Array.isArray(ps.enum)) {
           return {
-            assertion: { type: "json_schema", schema },
+            assertion: assertionBase,
             passed: false,
             message: `Property "${propName}" has invalid enum (must be an array)`,
           };
         }
         if (!Object.hasOwn(obj, propName) || !ps.enum.includes(obj[propName])) {
           return {
-            assertion: { type: "json_schema", schema },
+            assertion: assertionBase,
             passed: false,
             message: `Property "${propName}" value ${JSON.stringify(obj[propName])} not in enum ${JSON.stringify(ps.enum)}`,
           };
@@ -378,7 +445,7 @@ function evaluateJsonSchema(
         const err = checkPropertyType(obj[propName], ps, propName, "");
         if (err) {
           return {
-            assertion: { type: "json_schema", schema },
+            assertion: assertionBase,
             passed: false,
             message: err,
           };
@@ -388,7 +455,7 @@ function evaluateJsonSchema(
   }
 
   return {
-    assertion: { type: "json_schema", schema },
+    assertion: assertionBase,
     passed: true,
     message: "JSON schema checks passed",
   };
@@ -646,7 +713,7 @@ export function evaluateAssertion(
     case "regex":
       return evaluateRegex(output, assertion.pattern, assertion.flags);
     case "json_schema":
-      return evaluateJsonSchema(output, assertion.schema);
+      return evaluateJsonSchema(output, assertion.schema, assertion.allowFences);
     case "max_diff_lines":
       return evaluateMaxDiffLines(output, assertion.value, ctx);
     case "json_path":

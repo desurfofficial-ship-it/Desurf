@@ -8,7 +8,7 @@ export type Assertion =
   | { type: "required"; value: string; caseSensitive?: boolean }
   | { type: "forbidden"; value: string; caseSensitive?: boolean }
   | { type: "regex"; pattern: string; flags?: string }
-  | { type: "json_schema"; schema: Record<string, unknown> }
+  | { type: "json_schema"; schema: Record<string, unknown>; allowFences?: boolean }
   | { type: "max_diff_lines"; value: number }
   | {
       type: "json_path";
