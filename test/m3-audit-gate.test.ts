@@ -93,13 +93,23 @@ async function fixtureRepo(opts: {
 }
 
 describe("M3 H4 audit gate", () => {
-  it("T13a: real repo root has no v0.8.0 audit doc → exit 1", async () => {
+  it("T13a: real repo root gate matches package.json audit doc presence", async () => {
+    const pkg = JSON.parse(await readFile(resolve("package.json"), "utf8")) as {
+      version: string;
+    };
+    const docPath = resolve(`docs/audits/v${pkg.version}.md`);
+    const { existsSync } = await import("node:fs");
     const r = await runGate(resolve("."));
-    expect(r.code).toBe(1);
     const out = r.stdout + r.stderr;
-    expect(out).toMatch(/docs\/audits\/v0\.8\.0\.md/);
-    expect(out).toMatch(/AUDIT-VERDICT: PASS/);
-    expect(out).toMatch(/Audited-commit:/);
+    if (!existsSync(docPath)) {
+      expect(r.code).toBe(1);
+      expect(out).toContain(`docs/audits/v${pkg.version}.md`);
+      expect(out).toMatch(/AUDIT-VERDICT: PASS/);
+      expect(out).toMatch(/Audited-commit:/);
+    } else {
+      expect(r.code).toBe(0);
+      expect(out).toMatch(/AUDIT GATE PASS/);
+    }
   });
 
   it("T13b: publish.yml has audit-gate before publish and needs: audit-gate", async () => {
