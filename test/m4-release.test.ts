@@ -27,6 +27,7 @@ describe("M4 release guards", () => {
       "docs/cli-contract.md",
       "examples/github-actions/desurf.yml",
       "examples/github-actions/desurf-drift-watch.yml",
+      ".github/workflows/desurf-drift-watch.yml",
     ];
     for (const f of files) {
       const t = await readFile(resolve(f), "utf8");
@@ -34,6 +35,11 @@ describe("M4 release guards", () => {
       if (f === "docs/dogfooding.md") {
         expect(t).toMatch(/@desurfofficial-ship-it\/desurf@0\.9\.0/);
         expect(t).toMatch(/Desurf version \| 0\.9\.0/);
+        continue;
+      }
+      if (f === ".github/workflows/desurf-drift-watch.yml") {
+        expect(t).toMatch(/VER="0\.9\.0"/);
+        expect(t).not.toMatch(/0\.8\.0/);
         continue;
       }
       expect(t, f).not.toMatch(/0\.8\.0/);

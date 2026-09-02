@@ -171,6 +171,6 @@ Production path validated on GitHub-hosted runners using published
 
 ### Changes made for F-5
 
-- `.github/workflows/desurf-drift-watch.yml` installed from example (0.8.0 pin, fixtures/basic default)
+- `.github/workflows/desurf-drift-watch.yml` installed from example (0.8.0 pin at F-5; bumped to 0.9.0 in the H7 self-bump round — see below)
 - `fixtures/drift-watch-dogfood/` lenient suite for recovery soak
 - jq suite-name fix in production + example workflow

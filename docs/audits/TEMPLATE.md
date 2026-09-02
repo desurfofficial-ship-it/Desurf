@@ -1,6 +1,6 @@
-# Desurf release audit — v&lt;version&gt;
+# Desurf release audit — v<version>
 
-File name: `docs/audits/v&lt;version&gt;.md` (e.g. `v0.9.0.md`).
+File name: `docs/audits/v<version>.md` (e.g. `v0.9.0.md`).
 
 `ci/audit-gate.sh` checks the two lines below mechanically on every publish.
 
