@@ -10,7 +10,7 @@
 # Pins:
 # - Action ref: @main is the development tip; prefer a full commit SHA in production.
 #   A stable v0.4 Action tag will be created only when the v0.4 release is cut (not yet).
-# - npm package: pin with `version:` (never "latest"); default/current stable is 0.9.0
+# - npm package: pin with `version:` (never "latest"); default/current stable is 1.0.0
 
 name: Desurf offline gate
 
@@ -32,4 +32,4 @@ jobs:
         uses: desurfofficial-ship-it/Desurf@main
         with:
           suite: ./desurf-suite
-          version: "0.9.0"
+          version: "1.0.0"

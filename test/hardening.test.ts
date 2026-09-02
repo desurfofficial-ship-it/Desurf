@@ -47,11 +47,11 @@ describe("Hardening & Edge Cases (D-01, D-02, D-03)", { timeout: 35000 }, () => 
     it("top-level `desurf --version` and `desurf -v` print version and exit 0", async () => {
       const v1 = await runCli(["--version"]);
       expect(v1.code).toBe(0);
-      expect(v1.stdout.trim()).toBe("0.9.0");
+      expect(v1.stdout.trim()).toBe("1.0.0");
 
       const v2 = await runCli(["-v"]);
       expect(v2.code).toBe(0);
-      expect(v2.stdout.trim()).toBe("0.9.0");
+      expect(v2.stdout.trim()).toBe("1.0.0");
     });
 
     it("`desurf test --suite <valid> --verbose` runs the test in verbose mode and includes output", async () => {

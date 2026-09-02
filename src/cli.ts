@@ -48,7 +48,7 @@ function getVersion(): string {
   } catch {
     // fall through
   }
-  return "0.9.0";
+  return "1.0.0";
 }
 
 function printRootHelp(): void {

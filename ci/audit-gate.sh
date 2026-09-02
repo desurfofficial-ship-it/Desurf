@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Desurf release audit gate (RFC-002 H4).
 # Run from the repo root of the release checkout.
-# Env: AUDIT_TAG (optional) — e.g. v0.9.0; defaults to v${package.json version}.
+# Env: AUDIT_TAG (optional) — e.g. v1.0.0; defaults to v${package.json version}.
 set -euo pipefail
 
 fail_block() {

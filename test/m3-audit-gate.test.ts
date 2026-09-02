@@ -139,7 +139,7 @@ describe("M3 H4 audit gate", () => {
 
   it("T14a: PASS but deadbeef SHA → exit 1 ancestor", async () => {
     const { dir } = await fixtureRepo({
-      version: "0.9.0",
+      version: "1.0.0",
       doc: "AUDIT-VERDICT: PASS\nAudited-commit: deadbeef\n",
     });
     try {
@@ -152,10 +152,10 @@ describe("M3 H4 audit gate", () => {
   });
 
   it("T14b: PASS + real HEAD sha → exit 0", async () => {
-    const { dir, head } = await fixtureRepo({ version: "0.9.0", doc: null });
+    const { dir, head } = await fixtureRepo({ version: "1.0.0", doc: null });
     try {
       await writeFile(
-        join(dir, "docs", "audits", "v0.9.0.md"),
+        join(dir, "docs", "audits", "v1.0.0.md"),
         `AUDIT-VERDICT: PASS\nAudited-commit: ${head}\n`
       );
       // doc on working tree is enough; gate does not require commit of the doc for existence
@@ -168,10 +168,10 @@ describe("M3 H4 audit gate", () => {
   });
 
   it("T14c: AUDIT-VERDICT: FAIL → exit 1", async () => {
-    const { dir, head } = await fixtureRepo({ version: "0.9.0", doc: null });
+    const { dir, head } = await fixtureRepo({ version: "1.0.0", doc: null });
     try {
       await writeFile(
-        join(dir, "docs", "audits", "v0.9.0.md"),
+        join(dir, "docs", "audits", "v1.0.0.md"),
         `AUDIT-VERDICT: FAIL\nAudited-commit: ${head}\n`
       );
       const r = await runGate(dir);
@@ -182,10 +182,10 @@ describe("M3 H4 audit gate", () => {
   });
 
   it("T14d: PASS but no Audited-commit line → exit 1", async () => {
-    const { dir } = await fixtureRepo({ version: "0.9.0", doc: null });
+    const { dir } = await fixtureRepo({ version: "1.0.0", doc: null });
     try {
       await writeFile(
-        join(dir, "docs", "audits", "v0.9.0.md"),
+        join(dir, "docs", "audits", "v1.0.0.md"),
         `AUDIT-VERDICT: PASS\n`
       );
       const r = await runGate(dir);
@@ -197,13 +197,13 @@ describe("M3 H4 audit gate", () => {
   });
 
   it("T14e: AUDIT_TAG v0.8.0 vs package 0.9.0 → exit 1", async () => {
-    const { dir, head } = await fixtureRepo({ version: "0.9.0", doc: null });
+    const { dir, head } = await fixtureRepo({ version: "1.0.0", doc: null });
     try {
       await writeFile(
-        join(dir, "docs", "audits", "v0.9.0.md"),
+        join(dir, "docs", "audits", "v1.0.0.md"),
         `AUDIT-VERDICT: PASS\nAudited-commit: ${head}\n`
       );
-      const r = await runGate(dir, { AUDIT_TAG: "v0.8.0" });
+      const r = await runGate(dir, { AUDIT_TAG: "v0.9.0" });
       expect(r.code).toBe(1);
       expect(r.stdout + r.stderr).toMatch(/does not match package\.json version/);
     } finally {

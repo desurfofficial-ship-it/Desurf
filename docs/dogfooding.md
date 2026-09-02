@@ -133,7 +133,7 @@ Verification: 91 tests green; init suite PASS (exit 0); mutated cassette → REG
 **Status: CLOSED**
 
 Production path validated on GitHub-hosted runners using published
-`@desurfofficial-ship-it/desurf@0.9.0` and repository secret `OPENROUTER_API_KEY`
+`@desurfofficial-ship-it/desurf@1.0.0` and repository secret `OPENROUTER_API_KEY`
 (never logged).
 
 ### Real GitHub evidence
@@ -146,7 +146,7 @@ Production path validated on GitHub-hosted runners using published
 | Dedup run | [33581099715](https://github.com/desurfofficial-ship-it/Desurf/actions/runs/33581099715) — comment on #9, no second issue |
 | Controlled drift | [33581206590](https://github.com/desurfofficial-ship-it/Desurf/actions/runs/33581206590) — dogfood forced fail → issue **#10** |
 | Recovery | [33581271752](https://github.com/desurfofficial-ship-it/Desurf/actions/runs/33581271752) — exit 0 → #10 closed with recovered comment |
-| Desurf version | 0.9.0 (npm pin) |
+| Desurf version | 1.0.0 (npm pin) |
 | Provider / model | openrouter / openai/gpt-4o-mini |
 | Commit (workflow install) | `a7193de` |
 | Secrets | OPENROUTER_API_KEY referenced only as `${{ secrets.OPENROUTER_API_KEY }}` |
@@ -185,7 +185,7 @@ sweep listed only eight paths and omitted `.github/workflows/desurf-drift-watch.
 installed workflow, and records a live run on main.
 
 - **Run:** https://github.com/desurfofficial-ship-it/Desurf/actions/runs/33619342288
-- **Desurf:** `@desurfofficial-ship-it/desurf@0.9.0` (npm install in workflow)
+- **Desurf:** `@desurfofficial-ship-it/desurf@1.0.0` (npm install in workflow)
 - **Suite / provider / model:** `fixtures/basic` · openrouter · `openai/gpt-4o-mini` · repeat 3
 - **Observed:** `status=REGRESSION`, desurf exit **1**, classify **`class=drift`**
 - **Issue:** [#11](https://github.com/desurfofficial-ship-it/Desurf/issues/11) opened (left open; expected model variability — markdown-fenced JSON vs strict `json_schema`, same F-5 pattern)
