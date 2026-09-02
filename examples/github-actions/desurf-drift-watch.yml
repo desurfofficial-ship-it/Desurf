@@ -68,7 +68,7 @@ jobs:
           source "$LIB"
           CLASS=$(classify_run drift-summary.json)
           echo "class=$CLASS"
-          SUITE_NAME=$(jq -r '.suiteName // "suite"' drift-summary.json 2>/dev/null || echo suite)
+          SUITE_NAME=$(jq -r '.suite // .suiteName // "suite"' drift-summary.json 2>/dev/null || echo suite)
           CONTEXT=$(jq -n --arg s "$SUITE" --arg p "$PROVIDER" --arg m "$MODEL" --arg r "$REPEAT" --arg e "${EXITCODE:-n/a}" --arg u "$RUN_URL" --arg t "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '{suite:$s,provider:$p,model:$m,repeat:($r|tonumber),exitCode:$e,runUrl:$u,timestamp:$t}')
           echo "## Desurf drift-watch class=$CLASS" >> "$GITHUB_STEP_SUMMARY"
           case "$CLASS" in
