@@ -1,0 +1,8 @@
+{
+  "version": 2,
+  "inputSha256": "5ccda689d9ae0ca91eb957a7835da6a9d2c0f5e1feddec189a4e31821d2025bb",
+  "promptSha256": "577e0a1bea3b042f5280bd62b27b374f846a18f77de9fd2ee92bd08b97974282",
+  "outputSha256": "98429fa1cc02116a7e4587dc2421696bd95e50da4e3ab29317bca3e7a98cb2d7",
+  "source": "seal",
+  "drift": "hard"
+}

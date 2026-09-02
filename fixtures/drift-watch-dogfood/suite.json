@@ -1,0 +1,14 @@
+{
+  "name": "drift-watch-dogfood",
+  "cases": [
+    {
+      "id": "billing-mention",
+      "input": "inputs/double-charge.txt",
+      "prompt": "prompts/classify.txt",
+      "output": "outputs/out.txt",
+      "assertions": [
+        { "type": "required", "value": "billing", "caseSensitive": false }
+      ]
+    }
+  ]
+}
