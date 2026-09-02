@@ -185,7 +185,7 @@ sweep listed only eight paths and omitted `.github/workflows/desurf-drift-watch.
 installed workflow, and records a live run on main.
 
 - **Run:** https://github.com/desurfofficial-ship-it/Desurf/actions/runs/33619342288
-- **Desurf:** `@desurfofficial-ship-it/desurf@1.0.0` (npm install in workflow)
+- **Desurf:** `@desurfofficial-ship-it/desurf@0.9.0` (npm install in workflow)
 - **Suite / provider / model:** `fixtures/basic` · openrouter · `openai/gpt-4o-mini` · repeat 3
 - **Observed:** `status=REGRESSION`, desurf exit **1**, classify **`class=drift`**
 - **Issue:** [#11](https://github.com/desurfofficial-ship-it/Desurf/issues/11) opened (left open; expected model variability — markdown-fenced JSON vs strict `json_schema`, same F-5 pattern)

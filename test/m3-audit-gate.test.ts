@@ -196,7 +196,7 @@ describe("M3 H4 audit gate", () => {
     }
   });
 
-  it("T14e: AUDIT_TAG v0.8.0 vs package 0.9.0 → exit 1", async () => {
+  it("T14e: AUDIT_TAG v0.9.0 vs package 1.0.0 → exit 1", async () => {
     const { dir, head } = await fixtureRepo({ version: "1.0.0", doc: null });
     try {
       await writeFile(
