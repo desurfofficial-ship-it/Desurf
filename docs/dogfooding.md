@@ -133,7 +133,7 @@ Verification: 91 tests green; init suite PASS (exit 0); mutated cassette → REG
 **Status: CLOSED**
 
 Production path validated on GitHub-hosted runners using published
-`@desurfofficial-ship-it/desurf@0.8.0` and repository secret `OPENROUTER_API_KEY`
+`@desurfofficial-ship-it/desurf@0.9.0` and repository secret `OPENROUTER_API_KEY`
 (never logged).
 
 ### Real GitHub evidence
@@ -146,7 +146,7 @@ Production path validated on GitHub-hosted runners using published
 | Dedup run | [33581099715](https://github.com/desurfofficial-ship-it/Desurf/actions/runs/33581099715) — comment on #9, no second issue |
 | Controlled drift | [33581206590](https://github.com/desurfofficial-ship-it/Desurf/actions/runs/33581206590) — dogfood forced fail → issue **#10** |
 | Recovery | [33581271752](https://github.com/desurfofficial-ship-it/Desurf/actions/runs/33581271752) — exit 0 → #10 closed with recovered comment |
-| Desurf version | 0.8.0 (npm pin) |
+| Desurf version | 0.9.0 (npm pin) |
 | Provider / model | openrouter / openai/gpt-4o-mini |
 | Commit (workflow install) | `a7193de` |
 | Secrets | OPENROUTER_API_KEY referenced only as `${{ secrets.OPENROUTER_API_KEY }}` |
