@@ -104,6 +104,9 @@ See `docs/cli-contract.md` for `diff` / `--json` behavior on turns cases.
 ```json
 { "type": "json_schema", "schema": { "type": "object", "required": ["category"] }, "allowFences": true }
 ```
+
+See [docs/assertions-cookbook.md](assertions-cookbook.md) for authoring guidance.
+
 ### `max_diff_lines` (v0.8.0)
 
 `{ "type": "max_diff_lines", "value": <N> }` — `N` integer ≥ 0. Fails when unified-diff changed lines (`+`/`-`, normalized) exceed the budget.

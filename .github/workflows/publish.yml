@@ -15,7 +15,25 @@ permissions:
   id-token: write
 
 jobs:
+  audit-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout release
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name || github.event.inputs.tag || github.ref }}
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          package-manager-cache: false
+      - name: Run audit gate
+        env:
+          AUDIT_TAG: ${{ github.event.release.tag_name || github.event.inputs.tag }}
+        run: bash ci/audit-gate.sh
+
   publish:
+    needs: audit-gate
     runs-on: ubuntu-latest
 
     steps:
