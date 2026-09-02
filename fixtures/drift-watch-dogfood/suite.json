@@ -7,7 +7,11 @@
       "prompt": "prompts/classify.txt",
       "output": "outputs/out.txt",
       "assertions": [
-        { "type": "required", "value": "billing", "caseSensitive": false }
+        {
+          "type": "required",
+          "value": "ZZZ-NEVER-MATCH-DRIFT-SOAK",
+          "caseSensitive": false
+        }
       ]
     }
   ]
