@@ -125,3 +125,52 @@ input
 The example remains offline-first and does not require a live provider.
 
 Verification: 91 tests green; init suite PASS (exit 0); mutated cassette → REGRESSION (exit 1); restored → PASS (exit 0).
+
+---
+
+## F-5 — Real GitHub Actions drift-watch soak (2026-09-02)
+
+**Status: CLOSED**
+
+Production path validated on GitHub-hosted runners using published
+`@desurfofficial-ship-it/desurf@0.8.0` and repository secret `OPENROUTER_API_KEY`
+(never logged).
+
+### Real GitHub evidence
+
+| Field | Value |
+|-------|-------|
+| Date | 2026-09-02T01:51Z–01:56Z UTC |
+| Workflow | Desurf drift-watch (`.github/workflows/desurf-drift-watch.yml`) |
+| First run | [33581023616](https://github.com/desurfofficial-ship-it/Desurf/actions/runs/33581023616) — fixtures/basic → REGRESSION → class=`drift` → issue **#9** |
+| Dedup run | [33581099715](https://github.com/desurfofficial-ship-it/Desurf/actions/runs/33581099715) — comment on #9, no second issue |
+| Controlled drift | [33581206590](https://github.com/desurfofficial-ship-it/Desurf/actions/runs/33581206590) — dogfood forced fail → issue **#10** |
+| Recovery | [33581271752](https://github.com/desurfofficial-ship-it/Desurf/actions/runs/33581271752) — exit 0 → #10 closed with recovered comment |
+| Desurf version | 0.8.0 (npm pin) |
+| Provider / model | openrouter / openai/gpt-4o-mini |
+| Commit (workflow install) | `a7193de` |
+| Secrets | OPENROUTER_API_KEY referenced only as `${{ secrets.OPENROUTER_API_KEY }}` |
+
+### Lifecycle matrix
+
+| Step | Result |
+|------|--------|
+| Healthy / recovery run | PASS exit 0 on dogfood suite |
+| Drift detection | REGRESSION → classify `drift` |
+| Issue creation | #9 (basic), #10 (dogfood) |
+| Deduplication | Second basic run commented #9 only |
+| Recovery + close | #10 closed by drift-watch bot |
+
+### Problems discovered
+
+1. **Workflow jq path** used `.suiteName` but `--json` emits `suite` → all issues
+   shared fingerprint `suite`. Fixed in `9fc72fa` to `.suite // .suiteName`.
+2. **fixtures/basic** + gpt-4o-mini often returns markdown-fenced JSON → json_schema
+   REGRESSION (expected model variability; not an OpenRouter auth failure).
+3. **Node 20 deprecation warning** on checkout/setup-node actions (runner default Node 24).
+
+### Changes made for F-5
+
+- `.github/workflows/desurf-drift-watch.yml` installed from example (0.8.0 pin, fixtures/basic default)
+- `fixtures/drift-watch-dogfood/` lenient suite for recovery soak
+- jq suite-name fix in production + example workflow
