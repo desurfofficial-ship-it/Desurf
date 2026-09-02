@@ -49,9 +49,21 @@ set -euo pipefail
 LOG="${logPath}"
 STATE="${statePath}"
 echo "gh $*" >> "$LOG"
-# issue list --json number,body
+# issue list --json number,body (optional --label filter)
 if [[ "$*" == *"issue list"* ]]; then
-  jq -c '[.openIssues[] | {number, body}]' "$STATE"
+  LABEL=""
+  if [[ "$*" == *"--label "* ]]; then
+    set -- $*
+    while [ $# -gt 0 ]; do
+      if [ "$1" = "--label" ]; then LABEL="$2"; break; fi
+      shift
+    done
+  fi
+  if [ -n "$LABEL" ]; then
+    jq -c --arg lab "$LABEL" '[.openIssues[] | select((.labels // []) | index($lab)) | {number, body}]' "$STATE"
+  else
+    jq -c '[.openIssues[] | {number, body}]' "$STATE"
+  fi
   exit 0
 fi
 # issue create
@@ -228,6 +240,11 @@ describe("act lifecycle (T-G…T-J)", () => {
           body: `<!-- ${marker} -->\nold drift`,
           labels: ["desurf-drift"],
         },
+        {
+          number: 8,
+          body: `<!-- ${marker} -->\nold infra`,
+          labels: ["desurf-infra"],
+        },
       ],
     });
     await writeFile(
@@ -240,8 +257,15 @@ describe("act lifecycle (T-G…T-J)", () => {
     );
     expect(r.code).toBe(0);
     const log = await readFile(logPath, "utf8");
-    expect(log).toMatch(/issue comment/);
-    expect(log).toMatch(/issue close/);
+    const lines = log.trim().split("\n").filter((l) => l.length > 0);
+    // 2 list + 2 close = 4; zero standalone issue comment commands
+    expect(lines).toHaveLength(4);
+    expect(log).not.toMatch(/issue comment/);
+    const closes = lines.filter((l) => l.includes("issue close"));
+    expect(closes).toHaveLength(2);
+    for (const c of closes) {
+      expect(c).toMatch(/closed by drift-watch: recovered at/);
+    }
   });
 
   it("T-J: act infra → label desurf-infra", async () => {

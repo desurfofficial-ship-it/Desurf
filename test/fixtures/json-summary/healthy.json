@@ -1,0 +1,33 @@
+{
+  "suite": "basic",
+  "status": "PASS",
+  "counts": {
+    "passed": 1,
+    "flaky": 0,
+    "regression": 0,
+    "errors": 0,
+    "warnings": 0
+  },
+  "cases": [
+    {
+      "id": "support-classifier-good",
+      "state": "PASS",
+      "cassetteState": "unsealed",
+      "passCount": 1,
+      "failCount": 0,
+      "errorCount": 0,
+      "warnings": 0,
+      "executions": [
+        {
+          "passed": true,
+          "error": null,
+          "assertionFailures": [],
+          "outputPreview": "{ \"category\": \"billing\", \"explanation\": \"Customer appears to have been charged twice for their subscription.\" }",
+          "warnings": [],
+          "drift": null,
+          "diff": null
+        }
+      ]
+    }
+  ]
+}

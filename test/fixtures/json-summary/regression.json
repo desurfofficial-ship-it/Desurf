@@ -1,0 +1,42 @@
+{
+  "suite": "basic",
+  "status": "REGRESSION",
+  "counts": {
+    "passed": 0,
+    "flaky": 0,
+    "regression": 1,
+    "errors": 0,
+    "warnings": 0
+  },
+  "cases": [
+    {
+      "id": "support-classifier-good",
+      "state": "REGRESSION",
+      "cassetteState": "unsealed",
+      "passCount": 0,
+      "failCount": 1,
+      "errorCount": 0,
+      "warnings": 0,
+      "executions": [
+        {
+          "passed": false,
+          "error": null,
+          "assertionFailures": [
+            {
+              "type": "required",
+              "message": "Required content missing: \"billing\""
+            },
+            {
+              "type": "regex",
+              "message": "Regex did not match: /\"category\"\\s*:\\s*\"billing\"/"
+            }
+          ],
+          "outputPreview": "{\"category\":\"other\",\"explanation\":\"wrong\"}",
+          "warnings": [],
+          "drift": null,
+          "diff": null
+        }
+      ]
+    }
+  ]
+}

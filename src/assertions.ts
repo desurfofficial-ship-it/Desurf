@@ -9,7 +9,7 @@ import {
   RegexTimeoutError,
   regexTimeoutMs,
 } from "./regex-sandbox.js";
-import { unifiedDiff } from "./diff.js";
+import { unifiedDiff, countChangedLinesBetween } from "./diff.js";
 
 // Module-level singleton: one persistent evaluation worker for the whole
 // run (lazily spawned, reused across cases/repeats, terminated only when a
@@ -406,12 +406,16 @@ export type AssertionEvalContext = {
   baselineReference?: string | null;
 };
 
-/** Count +/- lines in a unified diff (exclude +++ / --- headers and truncation). */
+/** Terminal marker line produced by unifiedDiff when maxLines is exceeded. */
+const DIFF_TRUNCATION_MARKER = /^\.\.\. \(\d+ more lines truncated\)$/;
+
+/** Count +/- lines in a unified diff (exclude headers and the terminal truncation marker). */
 export function countChangedLines(diffText: string): number {
   let n = 0;
   for (const line of diffText.split("\n")) {
     if (line.startsWith("+++") || line.startsWith("---")) continue;
-    if (line.includes("truncated") || line.startsWith("@@")) continue;
+    if (line.startsWith("@@")) continue;
+    if (DIFF_TRUNCATION_MARKER.test(line)) continue;
     if (line.startsWith("+") || line.startsWith("-")) n++;
   }
   return n;
@@ -432,31 +436,23 @@ function evaluateMaxDiffLines(
       message: `diff budget ${budget}: no retained baseline (trivial pass)`,
     };
   }
-  // Import-free: unifiedDiff is imported at module top after we add it.
+  // Display-only render (may truncate); decision uses exact full-text count (H3).
   const diff = unifiedDiff(ref, output.text, 2000);
-  // If the helper truncates beyond 2000, treat as over budget by definition
-  // when the textual length of changed content is huge — unifiedDiff with
-  // maxLines 2000 still returns a truncated body; count what we have, and if
-  // the result contains a truncation marker assume exceeded.
-  const truncated = /truncated|lines omitted|maxLines/i.test(diff);
-  const changed = countChangedLines(diff);
-  if (truncated && changed >= budget) {
+  const changed = countChangedLinesBetween(ref, output.text);
+  const lastLine = diff.split("\n").pop() ?? "";
+  const displayCapped = DIFF_TRUNCATION_MARKER.test(lastLine);
+  const passed = changed <= budget;
+  if (passed) {
     return {
       assertion,
-      passed: false,
-      message:
-        `diff budget exceeded: ≥${changed} changed lines > ${budget} ` +
-        `(diff truncated at 2000 lines). Inspect with desurf diff --suite <path> --case <id> --full`,
+      passed: true,
+      message: `diff budget ${budget}: ${changed} changed lines (within budget)`,
     };
   }
-  const passed = changed <= budget;
-  return {
-    assertion,
-    passed,
-    message: passed
-      ? `diff budget ${budget}: ${changed} changed lines (within budget)`
-      : `diff budget exceeded: ${changed} changed lines > ${budget}. Inspect with desurf diff --suite <path> --case <id> --full`,
-  };
+  const msg = displayCapped
+    ? `diff budget exceeded: ${changed} changed lines > ${budget} (budget computed on full texts; diff display truncated at 2000 lines). Inspect with desurf diff --suite <path> --case <id> --full`
+    : `diff budget exceeded: ${changed} changed lines > ${budget}. Inspect with desurf diff --suite <path> --case <id> --full`;
+  return { assertion, passed: false, message: msg };
 }
 
 /**

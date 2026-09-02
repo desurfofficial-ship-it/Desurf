@@ -94,3 +94,40 @@ export function unifiedDiff(
   }
   return out.join("\n");
 }
+
+/**
+ * Exact changed-line count between two texts (F1 max_diff_lines / H3).
+ * Same prefix/suffix trim as unifiedDiff; returns oldMid + newMid length.
+ * No rendering, no cap.
+ */
+export function countChangedLinesBetween(oldText: string, newText: string): number {
+  const oldLines = toLines(oldText);
+  const newLines = toLines(newText);
+
+  if (oldLines.length === 0 && newLines.length === 0) return 0;
+  if (oldLines.join("\n") === newLines.join("\n")) return 0;
+
+  let prefix = 0;
+  while (
+    prefix < oldLines.length &&
+    prefix < newLines.length &&
+    oldLines[prefix] === newLines[prefix]
+  ) {
+    prefix++;
+  }
+
+  let suffix = 0;
+  while (
+    suffix < oldLines.length - prefix &&
+    suffix < newLines.length - prefix &&
+    oldLines[oldLines.length - 1 - suffix] ===
+      newLines[newLines.length - 1 - suffix]
+  ) {
+    suffix++;
+  }
+
+  const oldMid = oldLines.slice(prefix, oldLines.length - suffix);
+  const newMid = newLines.slice(prefix, newLines.length - suffix);
+  return oldMid.length + newMid.length;
+}
+

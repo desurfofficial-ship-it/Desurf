@@ -116,15 +116,13 @@ act() {
       return 0
       ;;
     healthy)
-      # Close open drift/infra issues for this suite with a recovered comment.
+      # Close open drift/infra issues for this suite with a single recovery comment.
       local label num
       for label in desurf-drift desurf-infra; do
         num=$(_find_open_issue "$label" "$suiteName")
         if [ -n "$num" ]; then
-          gh issue comment "$num" "${repo_args[@]}" \
-            --body "recovered at ${ts} (context: ${context})" 2>/dev/null || true
           gh issue close "$num" "${repo_args[@]}" \
-            --comment "closed by drift-watch: recovered at ${ts}" 2>/dev/null || true
+            --comment "closed by drift-watch: recovered at ${ts} (context: ${context})" 2>/dev/null || true
         fi
       done
       return 0
