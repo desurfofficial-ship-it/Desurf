@@ -1,0 +1,94 @@
+# Desurf scheduled drift-watch (monitoring only — not a merge gate)
+name: Desurf drift-watch
+on:
+  schedule:
+    - cron: "0 6 * * 1"  # Mondays 06:00 UTC; daily: 0 6 * * *
+  workflow_dispatch:
+    inputs:
+      suite: { description: Suite path, required: true, default: fixtures/basic }
+      provider: { description: Live provider, required: true, default: openrouter }
+      model: { description: Model id, required: false, default: "openai/gpt-4o-mini" }
+      repeat: { description: Repeat count, required: false, default: "3" }
+permissions:
+  contents: read
+  issues: write
+concurrency:
+  group: desurf-drift-watch
+  cancel-in-progress: false
+jobs:
+  drift-watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "22" }
+      - name: Install Desurf
+        run: |
+          VER="0.8.0"
+          npm install --no-save --no-package-lock "@desurfofficial-ship-it/desurf@${VER}"
+          echo "DESURF_BIN=$(pwd)/node_modules/.bin/desurf" >> "$GITHUB_ENV"
+      - name: Run desurf (live)
+        id: desurf
+        continue-on-error: true
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          SUITE: ${{ github.event.inputs.suite || 'fixtures/basic' }}
+          PROVIDER: ${{ github.event.inputs.provider || 'openrouter' }}
+          MODEL: ${{ github.event.inputs.model || 'openai/gpt-4o-mini' }}
+          REPEAT: ${{ github.event.inputs.repeat || '3' }}
+        run: |
+          set +e
+          if [ -n "$MODEL" ]; then
+            "$DESURF_BIN" test --suite "$SUITE" --provider "$PROVIDER" --model "$MODEL" --repeat "$REPEAT" --json 2>drift-stderr.txt | tee drift-summary.json
+          else
+            "$DESURF_BIN" test --suite "$SUITE" --provider "$PROVIDER" --repeat "$REPEAT" --json 2>drift-stderr.txt | tee drift-summary.json
+          fi
+          echo "exitcode=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
+          exit 0
+      - name: Ensure issue labels
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for lab in desurf-drift desurf-infra; do
+            gh label create "$lab" --force --color "B60205" --description "Desurf drift-watch" 2>/dev/null || true
+          done
+      - name: Classify and act
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SUITE: ${{ github.event.inputs.suite || 'fixtures/basic' }}
+          PROVIDER: ${{ github.event.inputs.provider || 'openrouter' }}
+          MODEL: ${{ github.event.inputs.model || 'openai/gpt-4o-mini' }}
+          REPEAT: ${{ github.event.inputs.repeat || '3' }}
+          EXITCODE: ${{ steps.desurf.outputs.exitcode }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          LIB=""
+          for c in examples/github-actions/drift-watch/lib.sh .github/workflows/drift-watch/lib.sh drift-watch/lib.sh; do
+            [ -f "$c" ] && LIB="$c" && break
+          done
+          [ -n "$LIB" ] || { echo "::error::lib.sh not found"; exit 2; }
+          source "$LIB"
+          CLASS=$(classify_run drift-summary.json)
+          echo "class=$CLASS"
+          SUITE_NAME=$(jq -r '.suiteName // "suite"' drift-summary.json 2>/dev/null || echo suite)
+          CONTEXT=$(jq -n --arg s "$SUITE" --arg p "$PROVIDER" --arg m "$MODEL" --arg r "$REPEAT" --arg e "${EXITCODE:-n/a}" --arg u "$RUN_URL" --arg t "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '{suite:$s,provider:$p,model:$m,repeat:($r|tonumber),exitCode:$e,runUrl:$u,timestamp:$t}')
+          echo "## Desurf drift-watch class=$CLASS" >> "$GITHUB_STEP_SUMMARY"
+          case "$CLASS" in
+            flaky) echo "::warning::FLAKY only — no issue opened" ;;
+            *) act "$CLASS" "$SUITE_NAME" drift-summary.json "$CONTEXT" ;;
+          esac
+      - name: Upload drift artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: drift-watch-${{ github.run_id }}
+          path: |
+            drift-summary.json
+            drift-stderr.txt
+          if-no-files-found: warn
+
