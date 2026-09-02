@@ -174,3 +174,20 @@ Production path validated on GitHub-hosted runners using published
 - `.github/workflows/desurf-drift-watch.yml` installed from example (0.8.0 pin at F-5; bumped to 0.9.0 in the H7 self-bump round — see below)
 - `fixtures/drift-watch-dogfood/` lenient suite for recovery soak
 - jq suite-name fix in production + example workflow
+
+
+### H7 self-bump round (v0.9.0)
+
+The installed watchdog must run the package version it watches. After the v0.9.0
+release the production workflow still pinned `VER="0.8.0"` because M4's S4b pin
+sweep listed only eight paths and omitted `.github/workflows/desurf-drift-watch.yml`
+(hidden-dir blind spot). H7 bumps that pin to `0.9.0`, extends S4b to scan the
+installed workflow, and records a live run on main.
+
+- **Run:** https://github.com/desurfofficial-ship-it/Desurf/actions/runs/33619342288
+- **Desurf:** `@desurfofficial-ship-it/desurf@0.9.0` (npm install in workflow)
+- **Suite / provider / model:** `fixtures/basic` · openrouter · `openai/gpt-4o-mini` · repeat 3
+- **Observed:** `status=REGRESSION`, desurf exit **1**, classify **`class=drift`**
+- **Issue:** [#11](https://github.com/desurfofficial-ship-it/Desurf/issues/11) opened (left open; expected model variability — markdown-fenced JSON vs strict `json_schema`, same F-5 pattern)
+- **Lesson:** pin sweeps must include installed workflows under `.github/`; S4b now guards `VER="0.9.0"` there permanently.
+- **H7 closed:** watchdog on main installs and classifies with the published 0.9.0 artifact.
