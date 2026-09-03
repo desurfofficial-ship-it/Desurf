@@ -12,7 +12,7 @@ Semantic Versioning (`MAJOR.MINOR.PATCH`):
 | New assertions, options, providers (backward compatible) | MINOR |
 | Bug fixes, docs, packaging | PATCH |
 
-Current version: **1.0.0**.
+Current version: **1.0.1**.
 
 Exit codes `0` / `1` / `2` are part of the **public API**. Do not change their meanings without a major version bump.
 

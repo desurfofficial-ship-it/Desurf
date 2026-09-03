@@ -48,7 +48,7 @@ function getVersion(): string {
   } catch {
     // fall through
   }
-  return "1.0.0";
+  return "1.0.1";
 }
 
 function printRootHelp(): void {
@@ -1545,17 +1545,15 @@ async function main(): Promise<number> {
   }
 }
 
-process.stdout.on("error", (err: any) => {
+function ignoreBrokenPipe(err: NodeJS.ErrnoException): void {
   if (err && (err.code === "EPIPE" || err.code === "ERR_STREAM_DESTROYED")) {
-    process.exit(0);
+    return;
   }
-});
+  throw err;
+}
 
-process.stderr.on("error", (err: any) => {
-  if (err && (err.code === "EPIPE" || err.code === "ERR_STREAM_DESTROYED")) {
-    process.exit(0);
-  }
-});
+process.stdout.on("error", ignoreBrokenPipe);
+process.stderr.on("error", ignoreBrokenPipe);
 
 main().then(
   (code) => {

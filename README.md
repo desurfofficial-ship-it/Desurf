@@ -233,3 +233,6 @@ Test conversational flows with an ordered list of user turns. The model answers 
 ```
 
 See `docs/cli-contract.md` for full semantics.
+
+
+Current stable release: **1.0.1**.

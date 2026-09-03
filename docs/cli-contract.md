@@ -247,3 +247,6 @@ For a turns case, each `executions[]` entry includes:
 ### `desurf diff` with no pending snapshot
 
 When there is no record snapshot for the case, `desurf diff` exits **1** with a not-found message (same family as accept/revert “nothing to accept”).
+
+
+Current stable release: **1.0.1**.

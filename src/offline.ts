@@ -42,6 +42,20 @@ const SUPPORTED_PROPERTY_TYPES = new Set([
   "null",
 ]);
 
+/**
+ * Deliberately minimal JSON Schema vocabulary supported by Desurf.
+ * Unknown / misspelled keys at any nesting level are rejected at load time
+ * so a typo cannot silently weaken a behavioral contract (false GREEN).
+ */
+const SUPPORTED_SCHEMA_KEYS = new Set([
+  "type",
+  "required",
+  "properties",
+  "const",
+  "enum",
+  "items",
+]);
+
 function assertNoUnknownFields(raw: RawAssertion): void {
   const allowed = ALLOWED_FIELDS[raw.type];
   if (!allowed) {
@@ -66,7 +80,24 @@ function assertNoUnknownFields(raw: RawAssertion): void {
  * unsupported property types are rejected here so a schema typo cannot
  * silently disable the check (false PASS).
  */
+function assertNoUnknownSchemaKeys(
+  schema: Record<string, unknown>,
+  pathLabel: string
+): void {
+  const unknown = Object.keys(schema).filter((k) => !SUPPORTED_SCHEMA_KEYS.has(k));
+  if (unknown.length > 0) {
+    throw new Error(
+      `json_schema: unsupported or unknown keyword(s) at ${pathLabel}: ${unknown
+        .map((k) => `"${k}"`)
+        .join(", ")}. ` +
+        `Supported keywords: ${[...SUPPORTED_SCHEMA_KEYS].join(", ")}`
+    );
+  }
+}
+
 function validateJsonSchemaShape(schema: Record<string, unknown>): void {
+  assertNoUnknownSchemaKeys(schema, "schema root");
+
   if (schema.type !== undefined && schema.type !== "object") {
     throw new Error(
       `json_schema: unsupported type "${String(schema.type)}" (only "object" is supported)`
@@ -115,6 +146,7 @@ function validatePropertySchema(
   ps: Record<string, unknown>,
   propName: string
 ): void {
+  assertNoUnknownSchemaKeys(ps, `property "${propName}"`);
   if ("type" in ps) {
     if (
       typeof ps.type !== "string" ||

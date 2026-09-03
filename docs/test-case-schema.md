@@ -59,7 +59,22 @@ JavaScript `RegExp` semantics: `new RegExp(pattern, flags ?? "")`.
 
 ### `json_schema`
 
-**Minimal** structured check (not full JSON Schema), against the **parsed** JSON value:
+**Minimal** structured check (not full JSON Schema), against the **parsed** JSON value.
+
+Supported schema keywords (only these; recursive on nested property / items schemas):
+
+- `type` (top-level: only `"object"`; on properties: `string` | `number` | `integer` | `boolean` | `object` | `array` | `null`)
+- `required` (array of strings)
+- `properties` (object of nested schemas)
+- `const` (primitive only)
+- `enum` (array of primitives)
+- `items` (single schema object, for array properties)
+
+**Unknown, misspelled, or unsupported keywords are rejected at load time (exit 2).**
+A typo such as `"requried"` or an unsupported keyword such as `"additionalProperties"`
+must never silently weaken the contract.
+
+Evaluation rules:
 
 - Output must parse as JSON
 - If `schema.type === "object"`, value must be a non-null object (not an array)
@@ -82,7 +97,7 @@ JavaScript `RegExp` semantics: `new RegExp(pattern, flags ?? "")`.
 
 ## Schema safety
 
-Unknown assertion fields are **rejected** at load time (configuration error → exit 2). A typo must never silently pass.
+Unknown assertion fields and unknown / unsupported JSON Schema keywords (at any nesting level) are **rejected** at load time (configuration error → exit 2). A typo must never silently pass or weaken a behavioral contract.
 
 ## Design rules
 
