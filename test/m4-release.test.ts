@@ -80,4 +80,101 @@ it("S4b: pin surfaces carry the current version", async () => {
     expect(m).toBeTruthy();
     expect(m![1]).toBe(pkg.version);
   });
+
+  /**
+   * S4d — doc trust alignment.
+   *
+   * v1.0.1 shipped with a README that said "Version 1.0.0" in the headline,
+   * the quickstart `--version` comment, the Action pin example, and the
+   * default-pin explanation — while the package, Action default, and npm
+   * `latest` were all 1.0.1. S4b only required that the current version
+   * appear *somewhere*, so the stale pins survived the release audit.
+   *
+   * For a product whose entire thesis is "trust the verdict", the docs
+   * contradicting themselves about what is installed is a trust defect.
+   * This guard pins the active (non-historical) version surfaces to the
+   * package version. Historical prose (feature-section headings like
+   * "## v0.7.0", dogfooding soak evidence, audit transcripts) is out of
+   * scope by design.
+   */
+  it("S4d: active doc version pins equal package.json version", async () => {
+    const pkg = JSON.parse(await readFile(resolve("package.json"), "utf8")) as {
+      version: string;
+    };
+    const EXPECTED = pkg.version;
+    const esc = EXPECTED.replace(/\./g, "\\.");
+
+    // README: headline version, quickstart --version comment, Action pin example.
+    const readme = await readFile(resolve("README.md"), "utf8");
+
+    expect(readme, "README headline 'Version **x.y.z**'").toMatch(
+      new RegExp(`Version \\*\\*${esc}\\*\\*`)
+    );
+
+    const versionComments = [
+      ...readme.matchAll(/--version\s*#\s*(\d+\.\d+\.\d+)/g),
+    ].map((m) => m[1]!);
+    expect(
+      versionComments.length,
+      "README --version expected-output comments"
+    ).toBeGreaterThan(0);
+    expect(versionComments.every((v) => v === EXPECTED)).toBe(true);
+
+    const readmePins = [
+      ...readme.matchAll(/version:\s*"(\d+\.\d+\.\d+)"/g),
+    ].map((m) => m[1]!);
+    expect(readmePins.length, "README version: \"...\" pins").toBeGreaterThan(0);
+    expect(readmePins.every((v) => v === EXPECTED)).toBe(true);
+
+    // README must not carry stale "planned vX tag" language for releases
+    // that were already cut (v0.4 shipped long before v1.x).
+    expect(readme).not.toMatch(/v0\.4` Action tag.*planned/i);
+
+    // cli-contract / publishing: every `version: "<semver>"` example pin is
+    // the current version. publishing.md legitimately has zero such pins
+    // (its tag example is generic `v<version>`); cli-contract carries the
+    // Action example and must have at least one.
+    for (const f of ["docs/cli-contract.md", "docs/publishing.md"]) {
+      const td = await readFile(resolve(f), "utf8");
+      const pins = [...td.matchAll(/version:\s*"(\d+\.\d+\.\d+)"/g)].map(
+        (m) => m[1]!
+      );
+      if (f === "docs/cli-contract.md") {
+        expect(pins.length, f).toBeGreaterThan(0);
+      }
+      expect(pins.every((v) => v === EXPECTED), f).toBe(true);
+    }
+
+    // cli-contract: stable-release footer and publishing: current-version
+    // line must name the published version.
+    const cliContract = await readFile(resolve("docs/cli-contract.md"), "utf8");
+    expect(cliContract).toMatch(
+      new RegExp(`Current stable release: \\*\\*${esc}\\*\\*`)
+    );
+    const publishing = await readFile(resolve("docs/publishing.md"), "utf8");
+    expect(publishing).toMatch(
+      new RegExp(`Current version: \\*\\*${esc}\\*\\*`)
+    );
+
+    // cold-start is the live first-60-seconds recipe (not historical
+    // evidence — that lives under docs/audits/): every install pin must be
+    // the current version.
+    const coldStart = await readFile(resolve("docs/cold-start.md"), "utf8");
+    const installPins = [
+      ...coldStart.matchAll(/desurf@(\d+\.\d+\.\d+)/g),
+    ].map((m) => m[1]!);
+    expect(installPins.length, "cold-start install pins").toBeGreaterThan(0);
+    expect(installPins.every((v) => v === EXPECTED)).toBe(true);
+
+    // package-lock.json is committed and CI runs `npm install`, so its root
+    // version fields must track package.json. (They said 1.0.0 after the
+    // 1.0.1 release bump — an `npm ci` switch would have failed on the
+    // mismatch, and the committed lockfile disagreed with the published
+    // artifact version.)
+    const lock = JSON.parse(
+      await readFile(resolve("package-lock.json"), "utf8")
+    ) as { version: string; packages: Record<string, { version?: string }> };
+    expect(lock.version).toBe(EXPECTED);
+    expect(lock.packages[""]?.version).toBe(EXPECTED);
+  });
 });

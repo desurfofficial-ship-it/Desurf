@@ -5,11 +5,11 @@ A new developer should be able to install Desurf from npm, initialize a suite, s
 ## 1. Install
 
 ```bash
-npm install @desurfofficial-ship-it/desurf@1.0.0
+npm install @desurfofficial-ship-it/desurf@1.0.1
 npx desurf --version
 ```
 
-Expected: the installed version string (e.g. `0.9.0` or `1.0.0`).
+Expected: `1.0.1` (the installed version string).
 
 ## 2. Initialize, seal, test
 

@@ -94,12 +94,16 @@ describe("GitHub Action (action.yml) — offline CI gate", () => {
     expect(content).toMatch(/author:\s*desurfofficial-ship-it/);
   });
 
-  it("documents Action ref vs npm version and does not invent v0.4 tag usage", async () => {
+  it("documents Action ref vs npm version and forbids referencing tags that do not exist", async () => {
     const readme = await readFile(resolve("README.md"), "utf8");
     expect(readme).toMatch(/Pins are independent/i);
     expect(readme).toMatch(/@main/);
     expect(readme).toMatch(/commit SHA/i);
-    expect(readme).toMatch(/v0\.4.*(?:not|until|planned|reserved)/i);
+    // Invariant (v1.0.1+): the README warns against referencing non-existent
+    // tags. The historical wording pinned this to the v0.4 release
+    // specifically; that release shipped long ago, so the guard now checks
+    // the rule, not the frozen v0.4-era sentence.
+    expect(readme).toMatch(/never reference a tag that does not exist/i);
     const example = await readFile(resolve("examples/github-actions/desurf.yml"), "utf8");
     expect(example).toMatch(/uses:\s*desurfofficial-ship-it\/Desurf@main/);
     expect(example).not.toMatch(/uses:\s*desurfofficial-ship-it\/Desurf@v0\.4/);

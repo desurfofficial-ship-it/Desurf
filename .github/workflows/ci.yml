@@ -29,7 +29,9 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "22"
-          # No package-lock.json in repo — do not set cache: npm
+          # package-lock.json is committed; CI uses npm install (not npm ci)
+          # so the lockfile must stay in sync with package.json — S4d-adjacent
+          # release discipline, verified by the m4 release guards.
 
       - name: Install dependencies
         run: npm install

@@ -41,7 +41,7 @@ npm run pack:check     # dry-run of npm pack
 2. Bump `version` in `package.json` if needed.
 3. `npm run build && npm test && npm run test:offline`
 4. `npm publish` (requires npm auth; package is configured `access: public`).
-5. Tag the release in git: `git tag v1.0.0 && git push --tags`
+5. Tag the release in git: `git tag v<version> && git push --tags`
 
 ## Local install without publishing
 
